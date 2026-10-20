@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildProactiveContext } from './proactiveChat'
+import { buildProactiveContext } from './proactivePrompt'
 import { DEFAULT_PROACTIVE_CONTEXT_PROMPT, DEFAULT_PROACTIVE_EXTRA_INSTRUCTION } from './proactiveDefaults'
 import type { Contact, ProactiveTopicRecord } from '../types'
 

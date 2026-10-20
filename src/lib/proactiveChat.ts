@@ -5,8 +5,9 @@ import { weightedSampleWithoutReplacement } from './groupChat'
 import { describeCurrentSchedule, isPhoneAvailable } from './schedule'
 import { getPersonalSchedule, isUserInDndNow } from './assistant'
 import { useSettingsStore } from '../store/useSettingsStore'
-import { describeCurrentTime, toDateKey } from './time'
-import { DEFAULT_PROACTIVE_CONTEXT_PROMPT, DEFAULT_PROACTIVE_TOPIC_SOURCES } from './proactiveDefaults'
+import { toDateKey } from './time'
+import { DEFAULT_PROACTIVE_TOPIC_SOURCES } from './proactiveDefaults'
+import { buildProactiveContext } from './proactivePrompt'
 import type { AppSettings, Contact, ProactiveTopicRecord } from '../types'
 
 export const AUTONOMOUS_TICK_INTERVAL_MS = 5 * 60 * 1000
@@ -35,7 +36,12 @@ async function chooseTopic(contact: Contact, settings: AppSettings): Promise<Pro
       else if (memory.importance >= 0.65) candidates.push({ topic: memory.content, source: 'memory' })
     }
   }
-  if (sources.plans) for (const plan of contact.upcomingPlans ?? []) candidates.push({ topic: plan.text, source: 'plan' })
+  if (sources.plans) {
+    const today = toDateKey(new Date())
+    for (const plan of contact.upcomingPlans ?? []) {
+      if (!plan.date || plan.date >= today) candidates.push({ topic: plan.text, source: 'plan' })
+    }
+  }
   if (sources.schedule) {
     const schedule = describeCurrentSchedule(contact, new Date())
     if (schedule) candidates.push({ topic: schedule, source: 'schedule' })
@@ -44,33 +50,6 @@ async function chooseTopic(contact: Contact, settings: AppSettings): Promise<Pro
   if (sources.casual) candidates.push({ topic: '结合当前时间和自己的生活状态，发一句符合性格的轻量日常消息', source: 'casual' })
   const chosen = candidates.find((item) => !used.has(item.topic))
   return chosen ? { ...chosen, createdAt: Date.now() } : undefined
-}
-
-function fillProactiveTemplate(template: string, vars: Record<string, string>): string {
-  return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_match, key: string) => vars[key] ?? '')
-}
-
-export function buildProactiveContext(
-  contact: Contact,
-  topic: ProactiveTopicRecord,
-  settings: Pick<AppSettings, 'proactiveContextPrompt' | 'proactiveExtraInstruction' | 'userNickname'>,
-  now = Date.now(),
-): string {
-  const recentTopics = (contact.proactiveTopicHistory ?? []).slice(-4).map((x) => x.topic).join('；') || '无'
-  const template = settings.proactiveContextPrompt?.trim() || DEFAULT_PROACTIVE_CONTEXT_PROMPT
-  const vars = {
-    topic: topic.topic,
-    source: topic.source,
-    recentTopics,
-    contactName: contact.name,
-    userName: settings.userNickname || '我',
-    time: describeCurrentTime(new Date(now)),
-  }
-  let context = fillProactiveTemplate(template, vars)
-  // Keep the chosen material visible even if the user edits the placeholder away.
-  if (!template.includes('{{topic}}')) context += `\n（本轮素材：${topic.topic}；来源：${topic.source}）`
-  if (settings.proactiveExtraInstruction?.trim()) context += `\n\n${settings.proactiveExtraInstruction.trim()}`
-  return context
 }
 
 export async function maybeTriggerProactiveMessage(settings: AppSettings): Promise<void> {
