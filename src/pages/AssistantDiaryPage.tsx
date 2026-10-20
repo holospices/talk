@@ -247,7 +247,11 @@ export function AssistantDiaryPage() {
     if (contactId) await appointAssistant(contactId)
     else clearAssistantContact()
     closeAssistantPicker()
-    setNotice(contactId ? '已更换小助理，TA 的感想已发到私聊' : '已取消小助理')
+    setNotice(contactId
+      ? settings.assistantReactionEnabled
+        ? '已更换小助理，TA 的感想已发到私聊'
+        : '已更换小助理（任命感想已关闭）'
+      : '已取消小助理')
     setError('')
   }
 
@@ -590,6 +594,17 @@ export function AssistantDiaryPage() {
             {assistant ? `当前由「${displayName(assistant)}」负责提醒和日记。` : '还没有设置小助理。'}
             确认日记后也会收到“是否更改明日助理”的提醒。
           </p>
+          <div className="mt-3 flex items-center justify-between gap-3 border-t border-[var(--ui-border-soft)] pt-3">
+            <div>
+              <p className="text-xs font-medium text-[var(--ui-text-2)]">任命时发送感想</p>
+              <p className="mt-0.5 text-[11px] leading-5 text-[var(--ui-text-3)]">开启后，新任命的小助理会在私聊里发一条自己的感想。</p>
+            </div>
+            <ToggleSwitch
+              checked={settings.assistantReactionEnabled}
+              onChange={(checked) => settings.setSettings({ assistantReactionEnabled: checked })}
+              ariaLabel="任命小助理时发送感想"
+            />
+          </div>
           <button type="button" onClick={() => setChangeAssistantOpen(true)} className="ui-secondary-action mt-3 py-2.5 text-sm">
             {assistant ? '更换小助理' : '选择一位小助理'}
           </button>

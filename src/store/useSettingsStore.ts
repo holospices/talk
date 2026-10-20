@@ -87,6 +87,7 @@ export const useSettingsStore = create<SettingsState>()(
       assistantDefaultRemindMinutes: ASSISTANT_DEFAULT_REMIND_MINUTES,
       assistantReminderPrompt: DEFAULT_ASSISTANT_REMINDER_PROMPT,
       assistantDiaryPrompt: DEFAULT_ASSISTANT_DIARY_PROMPT,
+      assistantReactionEnabled: true,
       assistantChangePromptDate: '',
       holidayGreetingEnabled: true,
       holidayGreetingMaxContacts: 3,
@@ -144,7 +145,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'talk-settings',
-      version: 33,
+      version: 34,
       migrate: (persisted, version) => {
         const next = persisted as Partial<SettingsState>
         if (next.experienceMode !== 'immersive' && next.experienceMode !== 'free') next.experienceMode = 'free'
@@ -179,6 +180,7 @@ export const useSettingsStore = create<SettingsState>()(
         if (typeof next.assistantReminderPrompt !== 'string') next.assistantReminderPrompt = DEFAULT_ASSISTANT_REMINDER_PROMPT
         if (typeof next.assistantDiaryPrompt !== 'string') next.assistantDiaryPrompt = DEFAULT_ASSISTANT_DIARY_PROMPT
         if (typeof next.assistantChangePromptDate !== 'string') next.assistantChangePromptDate = ''
+        if (typeof next.assistantReactionEnabled !== 'boolean') next.assistantReactionEnabled = true
         if (typeof next.assistantDefaultRemindMinutes !== 'number' || !Number.isFinite(next.assistantDefaultRemindMinutes)) {
           next.assistantDefaultRemindMinutes = ASSISTANT_DEFAULT_REMIND_MINUTES
         } else {

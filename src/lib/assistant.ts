@@ -280,8 +280,9 @@ export async function appointAssistant(contactId: string): Promise<void> {
   setAssistantContact(contactId)
   const contact = await db.contacts.get(contactId)
   if (!contact) return
-  const conversation = await ensureAssistantConversation(contact)
   const settings = useSettingsStore.getState()
+  if (!settings.assistantReactionEnabled) return
+  const conversation = await ensureAssistantConversation(contact)
   const context = '【本轮类型：被任命为小助理】用户刚刚把你设为 TA 的小助理。今后你负责在日程开始前提醒 TA，并在每晚帮 TA 写日记。请用你自己的口吻发一条简短的感想，表达你愿意做这件事、你会怎么提醒 TA。不要提“系统”“AI”“提示词”，不要写旁白，不要输出 JSON。'
   if (settings.apiKey) {
     await triggerAiTurn(conversation.id, contact, settings, await db.stickers.toArray(), context)

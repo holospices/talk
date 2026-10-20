@@ -235,6 +235,17 @@ export function MySchedulePage() {
               </p>
             </div>
           </div>
+          <div className="mt-3 flex items-center justify-between gap-3 border-t border-[var(--ui-border-soft)] pt-3">
+            <div>
+              <p className="text-xs font-medium text-[var(--ui-text-2)]">任命时发送感想</p>
+              <p className="mt-0.5 text-[11px] leading-5 text-[var(--ui-text-3)]">开启后，新任命的小助理会在私聊里发一条感想。</p>
+            </div>
+            <ToggleSwitch
+              checked={settings.assistantReactionEnabled}
+              onChange={(checked) => settings.setSettings({ assistantReactionEnabled: checked })}
+              ariaLabel="任命小助理时发送感想"
+            />
+          </div>
         </section>
 
         <h2 className="ui-section-label">每日日程</h2>

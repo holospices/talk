@@ -1112,6 +1112,8 @@ export interface AppSettings {
   assistantReminderPrompt: string
   /** User-editable instruction used to write the daily diary. */
   assistantDiaryPrompt: string
+  /** Whether the new assistant sends a short in-character reaction when appointed. */
+  assistantReactionEnabled: boolean
   /** Last day the "change tomorrow's assistant?" notification was already shown. */
   assistantChangePromptDate: string
   /** Whether contacts should proactively greet the user on a saved special day. */
