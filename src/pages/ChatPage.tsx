@@ -432,6 +432,30 @@ export function ChatPage() {
     if (replyToId === message.id) setReplyToId(null)
   }
 
+  async function deleteSelectedMessages() {
+    if (selectedMessageIds.length === 0) return
+    if (!window.confirm(`删除选中的 ${selectedMessageIds.length} 条聊天记录？删除后无法恢复。`)) return
+    const ids = Array.from(new Set(selectedMessageIds))
+    const targets = messages.filter((message) => ids.includes(message.id))
+    if (speechPlayingId && ids.includes(speechPlayingId)) stopSpeechPlayback()
+    await db.transaction('rw', db.messages, db.speechCache, db.mediaAssets, async () => {
+      await db.messages.bulkDelete(ids)
+      await db.speechCache.bulkDelete(ids)
+      const assetIds = targets.map((message) => message.image?.assetId).filter((id): id is string => !!id)
+      if (assetIds.length) await db.mediaAssets.bulkDelete(assetIds)
+    })
+    if (conversationId) {
+      const last = await db.messages.where('[conversationId+createdAt]')
+        .between([conversationId, Dexie.minKey], [conversationId, Dexie.maxKey], true, true)
+        .reverse().first()
+      await db.conversations.update(conversationId, { updatedAt: last?.createdAt ?? Date.now() })
+    }
+    if (replyToId && ids.includes(replyToId)) setReplyToId(null)
+    if (menuMessageId && ids.includes(menuMessageId)) setMenuMessageId(null)
+    cancelMessageSelection()
+    setToast(`已删除 ${ids.length} 条聊天记录`)
+  }
+
   async function generateMessageSpeech(message: Message, force = false) {
     if (!speechEnabled) return
     if (message.type !== 'text' || message.role !== 'assistant') return
@@ -963,6 +987,13 @@ export function ChatPage() {
               className="flex-1 rounded-xl bg-gray-900 px-4 py-2 text-sm text-white disabled:opacity-40"
             >
               {captureBusy ? '生成中…' : `生成截图 (${selectedMessageIds.length})`}
+            </button>
+            <button
+              onClick={() => void deleteSelectedMessages()}
+              disabled={selectedMessageIds.length === 0}
+              className="rounded-xl bg-red-500 px-3 py-2 text-sm text-white disabled:opacity-40"
+            >
+              删除
             </button>
           </div>
         ) : (

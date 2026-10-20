@@ -386,24 +386,29 @@ export function AssistantDiaryPage() {
                   type="button"
                   onClick={() => selectDate(date)}
                   aria-label={`${date.getMonth() + 1}月${date.getDate()}日${entry ? entry.status === 'confirmed' ? '，已确认日记' : '，待确认日记' : ''}${dayHolidays.length ? `，节日${dayHolidays.map((day) => day.name).join('、')}` : ''}`}
-                  className={`mx-auto flex h-10 w-10 flex-col items-center justify-center rounded-full text-sm ${
+                  className="mx-auto flex w-10 flex-col items-center"
+                >
+                  <span className={`flex h-10 w-10 flex-col items-center justify-center rounded-full text-sm ${
                     selected
                       ? 'bg-[var(--ui-action)] text-[var(--ui-on-action)]'
                       : today
                         ? 'bg-[var(--ui-accent-soft)] text-[var(--ui-action)]'
                         : 'text-[var(--ui-text)]'
-                  }`}
-                >
-                  <span className="leading-none">{date.getDate()}</span>
-                  <span className="mt-1 flex h-1.5 items-center gap-0.5">
-                    {entry && <span className={`h-1.5 w-1.5 rounded-full ${entry.status === 'confirmed' ? selected ? 'bg-[var(--ui-on-action)]' : 'bg-[var(--ui-action)]' : 'bg-[var(--ui-warning)]'}`} />}
-                    {dayHolidays.length > 0 && <span className={`h-1.5 w-1.5 rounded-full ${selected ? 'bg-[var(--ui-on-action)]' : 'bg-[var(--ui-warning)]'}`} />}
+                  }`}>
+                    <span className="leading-none">{date.getDate()}</span>
+                    <span className="mt-1 flex h-1.5 items-center gap-0.5">
+                      {entry && <span className={`h-1.5 w-1.5 rounded-full ${entry.status === 'confirmed' ? selected ? 'bg-[var(--ui-on-action)]' : 'bg-[var(--ui-action)]' : 'bg-[var(--ui-warning)]'}`} />}
+                      {dayHolidays.length > 0 && <span className={`h-1.5 w-1.5 rounded-full ${selected ? 'bg-[var(--ui-on-action)]' : 'bg-[var(--ui-warning)]'}`} />}
+                    </span>
+                  </span>
+                  <span className={`mt-0.5 w-full truncate text-center text-[10px] leading-3 ${selected ? 'text-[var(--ui-action)]' : 'text-[var(--ui-warning-ink)]'}`}>
+                    {dayHolidays.length > 0 ? dayHolidays.map((day) => day.name).join('·') : '\u00A0'}
                   </span>
                 </button>
               )
             })}
           </div>
-          <p className="mt-2 text-[11px] leading-5 text-[var(--ui-text-3)]">圆点：日记（实心已确认，黄色待确认）；第二个圆点：特殊节日。点日期查看当天日记。</p>
+          <p className="mt-2 text-[11px] leading-5 text-[var(--ui-text-3)]">圆点：日记（实心已确认，黄色待确认）；日期下方的文字是特殊节日。点日期查看当天日记。</p>
         </section>
 
         <h2 className="ui-section-label">{formatAssistantDate(selectedDate)}</h2>
