@@ -1,0 +1,1753 @@
+/** Single-dimension warmth model, -100 (hostile) to +100 (bonded) — see lib/relationship.ts. */
+export interface Contact {
+  id: string
+  /** Legacy required storage field, kept in sync with `nickname`. */
+  name: string
+  remark?: string // user's own nickname for this contact, like a real contacts app; overrides name for display
+  /** Public identity facts. `nickname` is the contact's displayed name. */
+  realName?: string
+  nickname?: string
+  gender?: string
+  birthday?: string // YYYY-MM-DD
+  avatar: string // emoji or data URL
+  avatarColor: string // fallback background color
+  /** Stable, scene-independent physical description used by image generation. */
+  visualIdentity?: string
+  /** Stable image seed. Missing legacy values are generated lazily. */
+  visualSeed?: number
+  systemPrompt: string // persona description generated at creation time; administrator-editable
+  /** User-authored requirements, preserved verbatim as a higher-priority persona source. */
+  personaConstraints?: string
+  /** The concrete shared past that anchors how this character treats the user from the first turn. */
+  sharedHistory?: string
+  /** Structured anchors generated alongside the narrative persona. */
+  personaProfile?: PersonaProfile
+  speechSamples?: string[] // short scene-labeled examples generated at creation time, used sparingly to stabilize voice
+  /** Per-provider TTS voice assignment. API credentials remain global; voices belong to contacts. */
+  speechVoices?: Partial<Record<Exclude<SpeechProviderId, 'none'>, ContactSpeechVoice>>
+  bio?: string
+  createdAt: number
+  // ---- adaptive memory ----
+  memoryFacts: string // compact known-facts summary about the user, refreshed periodically
+  memoryStyle: string // compact notes on how tone/familiarity should adapt to this user over time
+  memoryUpdatedAt: number
+  memoryMessageCursor: number // number of messages already folded into memory, so updates only look at what's new
+  // ---- relationship (single-dimension warmth, -100 hostile ~ +100 bonded) ----
+  /** Absent until the 好感度 module is enabled and the first evaluation runs, or a personality trait with an initial value is assigned. */
+  warmth?: number
+  relationshipBase: string // label the user picked at creation: 恋人/朋友/家人/... — only changes by explicit user action or explicit model assessment (e.g. "已经分手了")
+  /** Global creation-time relationship anchor used when a world has no story yet. */
+  initialRelationshipBase?: string
+  relationshipDynamic: string // short natural-language summary of what the relationship currently feels like, updated by the utility model on every memory update
+  personalityTrait?: string // 病娇/天然呆/傲娇/无. Affects warmth change rate via traitWarmthModifier; missing/无 = normal.
+  /** Short-term emotional state, assessed by the model each turn. Expires after ~30 min. Separate from warmth (long-term relationship). */
+  mood?: {
+    text: string
+    expiresAt: number
+  }
+  // ---- moments (朋友圈) ----
+  lastMomentAt?: number // when this contact last posted a moment, used for the "hasn't posted in 10 min" eligibility check
+  pendingEvents?: string[] // short notes about notable things to naturally mention next chat (e.g. "对方刚给你的朋友圈点了赞"), cleared once used
+  // ---- upcoming plans/appointments (extracted during memory updates, see memory.ts) ----
+  upcomingPlans?: PlanItem[]
+  // ---- autonomous behavior (see lib/proactiveChat.ts) ----
+  lastProactiveMessageAt?: number // last time this contact proactively opened a chat, used for the per-contact cooldown
+  // ---- schedule (see lib/schedule.ts) ----
+  schedule?: ScheduleBlock[] // fixed weekly pattern, generated at creation and administrator-editable
+  /** Global creation-time routine; per-world edits live in `schedule`. */
+  initialSchedule?: ScheduleBlock[]
+  scheduleOverrides?: ScheduleOverride[] // one-off special tasks negotiated in chat; each overlapping default task is cancelled as a whole for that occurrence
+  /** @deprecated Migration-only legacy field. New contacts fold every persona signal into `systemPrompt`. */
+  mbti?: string
+  // ---- auto-generated photo avatar (see lib/avatarCategory.ts + lib/photoSearch.ts) ----
+  avatarPhotographer?: string // Pexels photographer credit, unset for anime avatars or manually-picked emoji/uploads
+  avatarPhotographerUrl?: string
+  creatorProfile?: ContactCreatorProfile
+  customPersonalityTraits?: CustomPersonalityTrait[]
+  proactiveTopicHistory?: ProactiveTopicRecord[]
+  occupation?: string
+  monthlySalary?: number
+  jobStartedDate?: string
+  lastSalaryDate?: string
+  /** Stable home used when no concrete schedule or visit is active. */
+  residence?: ContactResidence
+  /** Optional home/current map anchor used by the 地点 module. */
+  currentLocationId?: string
+  locationUpdatedAt?: number
+  locationSource?: 'schedule' | 'specialTask' | 'manual' | 'fallback' | 'unknown'
+  /** Derived runtime task state, refreshed with location synchronization. */
+  currentTaskId?: string
+  currentTaskKind?: 'default' | 'special'
+  currentActivity?: string
+  taskUpdatedAt?: number
+  // ---- clothing ----
+  /** Clothes this character owns in the active story branch. */
+  wardrobe?: ClothingItem[]
+  /** Creation-time wardrobe used when a fresh world/story branch is opened. */
+  initialWardrobe?: ClothingItem[]
+  /** What the character is wearing right now. */
+  currentOutfit?: ContactOutfit
+  /** Creation-time outfit used when a fresh world/story branch is opened. */
+  initialOutfit?: ContactOutfit
+  /** Worldbook entries explicitly bound when this contact was created. */
+  worldbookEntryIds?: string[]
+  /** World that owns this contact in the currently materialized contact set. */
+  worldviewId?: string
+  /** End of the latest time range already covered by offline experience completion. */
+  experienceCursorAt?: number
+  /** Fixed prompt templates copied from the selected global archive. Never live-linked. */
+  promptModulesSnapshot?: PromptModuleSettings
+  promptPresetSourceId?: string
+  promptPresetSourceName?: string
+  promptSnapshotUpdatedAt?: number
+  /** Admin-only per-contact override for the step-two JSON conversion protocol. */
+  jsonProtocolOverride?: string
+  /** How this contact first entered the user's social graph. */
+  acquisition?: {
+    type: 'recommendation'
+    recommenderContactId: string
+    recommenderName: string
+    sourceMessageId: string
+    acceptedAt: number
+  }
+}
+
+/** A character fact; it cannot be casually changed by generated chat or experiences. */
+export interface ContactResidence {
+  locationId: string
+  kind: 'player_home' | 'apartment' | 'dorm' | 'other'
+  cohabitsWithUser: boolean
+  establishedBy: 'generation' | 'legacy' | 'user' | 'worldbook'
+}
+
+export const CLOTHING_CATEGORIES = ['上装', '下装', '连体装', '外套', '鞋履', '内搭', '袜子', '配饰', '睡衣', '其他'] as const
+export type ClothingCategory = (typeof CLOTHING_CATEGORIES)[number]
+
+export interface ClothingDraftItem {
+  name: string
+  category: ClothingCategory
+  color: string
+  description: string
+}
+
+export interface ClothingItem extends ClothingDraftItem {
+  id: string
+  createdAt: number
+}
+
+export interface ContactOutfit {
+  itemIds: string[]
+  summary: string
+  updatedAt: number
+  sourceConversationId?: string
+  sourceTurnId?: string
+}
+
+export interface OutfitChangeAction {
+  /** Complete outfit after the change, not merely the garments added/removed. */
+  items: ClothingDraftItem[]
+  summary: string
+}
+
+/** A recurring weekly time block — generated at contact creation and editable in administrator tools. */
+export interface PersonaProfile {
+  facts: string[]
+  boundaries: string[]
+  habits: string[]
+  behaviorAnchors: string[]
+}
+
+export interface ScheduleBlock {
+  id: string
+  dayOfWeek: number // 0=Sun..6=Sat
+  startHour: number // 0-23
+  endHour: number // 1-24, exclusive
+  phoneAccess: 'available' | 'unavailable'
+  location: string
+  locationId?: string
+  activity: string
+}
+
+/** A one-off exception to the recurring schedule for a specific date, produced when the AI agrees to (or itself proposes) a changed plan — see the scheduleChange bubble type in chatEngine.ts. */
+export interface ScheduleOverride {
+  id: string
+  date: string // "YYYY-MM-DD"
+  startHour: number
+  endHour: number
+  phoneAccess: 'available' | 'unavailable'
+  location: string
+  locationId?: string
+  activity: string
+  summary: string // short human-facing text shown in the chat bubble, e.g. "周三晚上：一起吃烧烤"
+  /** Conversation-derived plans take precedence over the generated weekly routine. */
+  priority?: 'special'
+  /** Minute-precision timestamps for new special tasks. Legacy rows fall back to date/startHour/endHour. */
+  startsAt?: number
+  endsAt?: number
+  status?: 'scheduled' | 'completed' | 'cancelled'
+  sourceConversationId?: string
+  sourceMessageId?: string
+  /** Explicit invitation required for a non-cohabiting contact's one-off visit to the player's home. */
+  playerHomeVisit?: boolean
+  /** Default task occurrences cancelled in full because this task overlaps them. */
+  cancelledDefaultTaskIds?: string[]
+  createdAt: number
+}
+
+/**
+ * One recurring activity in the user's own daily routine. This belongs to the
+ * user, not to a contact: see `Contact.schedule` for the separate weekly
+ * routine each character follows.
+ *
+ * Times are minutes from local midnight. `endMinute < startMinute` means the
+ * activity ends on the following day (e.g. 23:30 → 07:00).
+ */
+export interface PersonalScheduleItem {
+  id: string
+  startMinute: number
+  endMinute: number
+  activity: string
+  /** Ask the small assistant to send a reminder before this activity. */
+  remind: boolean
+  /** Minutes before `startMinute`; 0 means at the start time. */
+  remindMinutes: number
+  /** Block contacts from initiating chats during this activity (assistant reminders still fire). */
+  dnd: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+/** A diary written by the user's small assistant for one local calendar day. */
+export interface AssistantDiary {
+  id: string
+  /** Local calendar day key, YYYY-MM-DD — unique per day. */
+  date: string
+  assistantContactId: string
+  /** Name snapshot, so old diaries still render after the contact is deleted/renamed. */
+  assistantName: string
+  content: string
+  status: 'draft' | 'confirmed'
+  createdAt: number
+  updatedAt: number
+  confirmedAt?: number
+}
+
+/** One delivered reminder, used to make the scheduler idempotent across ticks/reloads. */
+export interface AssistantReminderLog {
+  id: string
+  /** The day the activity belongs to, YYYY-MM-DD. */
+  date: string
+  itemId: string
+  sentAt: number
+}
+
+/** A reversible system change. New kinds (outfit, inventory, etc.) add their
+ * own explicitly typed effects instead of storing an unsafe arbitrary patch. */
+export type InternalTaskEffect =
+  | { type: 'schedule_override_created'; override: ScheduleOverride }
+  | { type: 'special_tasks_replaced'; overrides: ScheduleOverride[] }
+  | { type: 'contact_runtime_changed'; before: ContactRuntimeSnapshot; after: ContactRuntimeSnapshot }
+
+export interface ContactRuntimeSnapshot {
+  currentLocationId?: string
+  locationSource?: Contact['locationSource']
+  currentTaskId?: string
+  currentTaskKind?: Contact['currentTaskKind']
+  currentActivity?: string
+}
+
+export interface InternalTask {
+  id: string
+  kind: 'schedule_arrangement'
+  status: 'active' | 'reverted'
+  contactId: string
+  conversationId: string
+  createdAt: number
+  revertedAt?: number
+  effects: InternalTaskEffect[]
+  presentation: {
+    title: string
+    date: string
+    startTime: string
+    endTime: string
+    activity: string
+    locationId: string
+    locationName: string
+    previousLocationName?: string
+    changedSections: Array<'schedule' | 'location'>
+    cancelledDefaultActivities: string[]
+  }
+}
+
+/** A plan/appointment this contact made with the user, extracted from casual conversation — see memory.ts. Persists across turns until its date passes, unlike pendingEvents which fire once. */
+export interface PlanItem {
+  id: string
+  text: string // short natural-language description, e.g. "周三晚上一起去吃烧烤"
+  date?: string // "YYYY-MM-DD" if the model could resolve a concrete date from context, empty/undefined otherwise
+  createdAt: number
+  confidence?: number
+}
+
+/** A directed relationship link between two AI contacts (set up when adding a contact), used to decide who reacts to whose moments. */
+export const CONTACT_RELATION_LABELS = [
+  '普通朋友',
+  '好朋友',
+  '损友',
+  '暧昧对象',
+  '恋人',
+  '家人',
+  '前辈/同事',
+  '点头之交',
+  '看不顺眼',
+  '对头',
+] as const
+export type ContactRelationLabel = (typeof CONTACT_RELATION_LABELS)[number] | (string & {})
+
+export const PERSONALITY_TRAIT_OPTIONS = [
+  { value: '病娇', description: '创建时好感100且无上限 好感只升不降 被温暖双倍心动 极度占有' },
+  { value: '天然呆', description: '反应慢半拍 单纯 情绪变化缓慢 不太会读空气' },
+  { value: '傲娇', description: '口是心非 越在意越表现得冷淡 防御心强 不擅长坦率' },
+  { value: '高冷', description: '冷淡疏离 不轻易被打动 熟了之后才会放下防备' },
+  { value: '元气', description: '乐观开朗 情绪恢复快 不记仇 永远活力满满' },
+  { value: '腹黑', description: '表面天然呆般人畜无害 心里什么都记着 不轻易被收买' },
+  { value: '妹控', description: '对妹妹系的人天然亲近 其他人较难打开心扉' },
+  { value: '兄控', description: '对兄长系的人天然亲近 其他人较难打开心扉' },
+  { value: '雌小鬼', description: '表面嘲讽捉弄 来拒去留 嘴上不饶人心里怕被丢下' },
+  { value: '妈妈', description: '无底线包容 好感度永远不会下降 创建时好感度固定为75' },
+  { value: '猫系', description: '尊重边界才会亲近 熟了以后嘴硬但黏人' },
+  { value: '犬系', description: '热情直球 忠诚爱分享 被回应会特别开心' },
+  { value: '爱哭包', description: '情绪外显 容易委屈 被安慰会迅速心软' },
+  { value: '撒娇怪', description: '用撒娇索取关注 被回应会更亲近 被忽略会委屈' },
+  { value: '小天使', description: '温柔治愈 善于原谅 但仍有自己的边界' },
+  { value: '爹系', description: '可靠照顾型 会提醒护短 不以控制代替关心' },
+  { value: '三无', description: '低反应少话 高好感后用行动和细节偏爱表达亲近' },
+  { value: '机器人', description: '理性精确 情绪表达迟缓 会逐渐学习关心' },
+  { value: '社恐', description: '陌生时紧张克制 熟悉后才会主动分享和依赖' },
+  { value: '吃货', description: '以美食和投喂作为日常亲近媒介 不强行聊吃' },
+  { value: '大小姐', description: '优雅挑剔 带一点优越感 只对亲近的人例外' },
+  { value: '无', description: '普通性格 没有特殊的情绪反应模式' },
+] as const
+export type PersonalityTrait = (typeof PERSONALITY_TRAIT_OPTIONS)[number]['value']
+
+export const HOBBY_TAG_OPTIONS = [
+  '养猫', '养狗', '打游戏', '运动健身', '追剧看电影',
+  '看书', '美食探店', '旅行', '音乐', '画画', '摄影', '二次元',
+] as const
+
+export interface ContactRelationLink {
+  id: string
+  fromContactId: string
+  toContactId: string
+  label: ContactRelationLabel
+  /** Same value on both directional records of one user-defined relationship. */
+  pairId?: string
+  createdAt: number
+  /** Stable user-authored label is kept above; these values evolve from shared social experiences. */
+  affinity?: number // -100..100, shared dynamic tone for this existing undirected link
+  familiarity?: number // 0..100, grows through shared/public interactions
+  tension?: number // 0..100, grows through conflict and decays through positive interactions
+  dynamicSummary?: string
+  lastInteractionAt?: number
+}
+
+export interface Moment {
+  id: string
+  /** Either a contactId, or the literal sentinel 'user' for a moment the app's own user posted themselves. */
+  contactId: string
+  content: string
+  createdAt: number
+  /** Model-produced canonical subject used to prevent semantic topic loops. */
+  topicKey?: string
+  /** Whether the post describes a past, current, future, or timeless subject. */
+  timeFrame?: 'past' | 'current' | 'future' | 'timeless'
+  /** Short grounding note naming the schedule, plan, experience, or ordinary observation behind the post. */
+  factBasis?: string
+  // ---- optional attached photo (see lib/photoSearch.ts) — not every moment gets one, code decides ----
+  imageUrl?: string
+  imageAssetId?: string
+  imagePhotographer?: string
+  imagePhotographerUrl?: string
+  sourceExperienceId?: string
+}
+
+export type MediaAssetStatus = 'queued' | 'submitting' | 'polling' | 'generating' | 'completed' | 'failed'
+export type MediaAssetPhase = MediaAssetStatus
+export type AiImageAspectRatio = '1:1' | '4:3' | '3:4' | '16:9' | '9:16'
+
+/** Durable image-generation work. Credentials are deliberately never stored here. */
+export interface MediaAsset {
+  id: string
+  origin: 'chat' | 'chat-illustration' | 'moment'
+  originId: string
+  conversationId?: string
+  turnId?: string
+  ownerContactIds: string[]
+  includeUser?: boolean
+  provider: Exclude<ImageProviderId, 'none'>
+  status: MediaAssetStatus
+  phase: MediaAssetPhase
+  scene: string
+  kind: AiImageKind
+  prompt: string
+  /** Atlas style and advanced prefix frozen when the placeholder is created. */
+  stylePrompt?: string
+  providerPromptPrefix?: string
+  modelId?: string
+  size?: string
+  width?: number
+  height?: number
+  aspectRatio?: AiImageAspectRatio
+  seed?: number
+  predictionId?: string
+  remoteUrl?: string
+  dataUrl?: string
+  mimeType?: string
+  error?: string
+  attempt: number
+  createdAt: number
+  updatedAt: number
+  completedAt?: number
+}
+
+export interface MomentComment {
+  id: string
+  momentId: string
+  /** Either a contactId, or the literal sentinel 'user' for a comment the app's own user left. */
+  authorContactId: string
+  /** May end with a "[sticker:名字]" marker appended directly after the text — see lib/moments.ts's parseCommentSticker. Only AI-authored comments ever contain this. */
+  content: string
+  createdAt: number
+  /** Set when this comment is a reply to a specific earlier comment (WeChat-style "A回复B") rather than a fresh top-level comment — id of that earlier MomentComment. */
+  replyToCommentId?: string
+}
+
+export interface MomentLike {
+  id: string
+  momentId: string
+  /** Either a contactId, or the literal sentinel 'user' for the app's own user liking a moment. */
+  likerId: string
+  createdAt: number
+}
+
+export type SocialEventType =
+  | 'moment_posted'
+  | 'moment_liked'
+  | 'moment_commented'
+  | 'group_turn'
+  | 'group_targeted_message'
+  | 'group_plan_created'
+  | 'group_plan_confirmed'
+  | 'group_plan_completed'
+  | 'group_plan_cancelled'
+  | 'group_plan_aftermath'
+  | 'message_feedback'
+
+export interface SocialEvent {
+  id: string
+  type: SocialEventType
+  /** 'user' or a contact id. */
+  actorId: string
+  /** 'user', a contact id, or omitted for broadcast events. */
+  targetId?: string
+  relatedContactIds: string[]
+  summary: string
+  conversationId?: string
+  groupId?: string
+  momentId?: string
+  messageId?: string
+  importance: number
+  createdAt: number
+  /** Events are short-term context, not permanent prompt ballast. */
+  expiresAt?: number
+}
+
+export interface Conversation {
+  id: string
+  contactId?: string // set for a 1:1 chat — exactly one of contactId/groupId is set
+  groupId?: string // set for a group chat
+  pinned: boolean
+  updatedAt: number
+  createdAt: number
+  lastReadAt?: number // stamped whenever ChatPage has this conversation open; unread count = assistant messages newer than this
+  /** System-owned conversations stay above ordinary user pins. */
+  systemPinned?: boolean
+}
+
+/** A group chat: still just one LLM call per turn simulating multiple personas (see groupChat.ts), not real independent AI-to-AI agents. */
+export interface Group {
+  id: string
+  name: string
+  avatar: string // emoji or data URL, like Contact
+  avatarColor: string
+  memberContactIds: string[]
+  memory?: string // group-level shared memory / lore visible to every member in group prompts
+  speakerLimit?: GroupSpeakerLimit // how many AI members may speak in one group turn
+  energyLevel?: GroupEnergyLevel // hard bounds the total number of tool-produced messages per turn
+  memoryTurnCount?: number // number of AI turns folded into group.memory; used to compress every few turns
+  createdAt: number
+  momentSharing?: 'enabled' | 'relationshipOnly' | 'private'
+  memoryMessageCursor?: number // how many of this group's messages have already been folded into members' memory (see memory.ts) — optional since it predates group memory
+  /** The location module reuses the normal Talk group engine and settings. */
+  kind?: 'standard' | 'location'
+  locationId?: string
+  /** Groups are single-world scenes; every member must belong to this world. */
+  worldviewId?: string
+}
+
+// ---- optional location module ----
+export type TerrainType = 'river' | 'grassland' | 'beach' | 'hill' | 'mountain' | 'urban' | 'rural'
+
+export interface LocationMapBinding {
+  x: number
+  y: number
+  allowedTerrains: TerrainType[]
+  buildingCategory: string
+  /** Optional catalog icon; falls back to buildingCategory for legacy rows. */
+  iconId?: string
+  /** User-imported local icon. Stored with the location so backups stay portable. */
+  customIconDataUrl?: string
+}
+
+export interface LocationNode {
+  id: string
+  parentId?: string
+  name: string
+  kind: string
+  description: string
+  /** User-authored notes kept separate from the public place description. */
+  note?: string
+  mapBinding?: LocationMapBinding
+  userCreated?: boolean
+  sortOrder: number
+  createdAt: number
+  updatedAt: number
+}
+
+export interface WorldMapRecord {
+  id: 'active'
+  width: number
+  height: number
+  seed: string
+  generatorVersion: number
+  mode: 'fixed' | 'custom'
+  tiles: TerrainType[]
+  themeId?: string
+  customBackgroundDataUrl?: string
+  customBackgroundName?: string
+  roads?: Array<{ points: Array<{ x: number; y: number }>; kind: 'primary' | 'secondary' }>
+  createdAt: number
+  updatedAt: number
+}
+
+export interface LocationModuleState {
+  id: 'active'
+  currentLocationId?: string
+  /** Version of built-in residence-room migrations already applied. */
+  residenceLayoutVersion?: number
+  /** Built-in locations removed by the user must not be recreated during initialization. */
+  deletedLocationIds?: string[]
+  updatedAt: number
+}
+
+export type LocationAudibility = 'clear' | 'muffled' | 'none'
+
+export interface AcousticEdge {
+  id: string
+  fromLocationId: string
+  toLocationId: string
+  audibility: LocationAudibility
+  bidirectional: boolean
+}
+
+export type GroupPlanStatus = 'pending' | 'confirmed' | 'completed' | 'cancelled'
+
+export interface GroupPlan {
+  id: string
+  groupId: string
+  sourceConversationId: string
+  sourceMessageId?: string
+  title: string
+  summary: string
+  scheduledAt?: number
+  location?: string
+  participantContactIds: string[]
+  status: GroupPlanStatus
+  createdAt: number
+  resolvedAt?: number
+}
+
+export type MessageRole = 'user' | 'assistant'
+export type MessageType = 'text' | 'sticker' | 'image' | 'link' | 'gift' | 'scheduleChange' | 'internalTask' | 'groupPlan' | 'locationEvent' | 'transfer' | 'redPacket' | 'loanRequest' | 'loanResult' | 'repayment'
+export type GroupSpeakerLimit = 2 | 3 | 4 | 5 | 'all'
+export type GroupEnergyLevel = 'cold' | 'normal' | 'lively'
+
+export interface LinkPayload {
+  app: string // e.g. 'shop' | 'work'
+  label: string
+  data?: Record<string, unknown>
+}
+
+export interface GiftPayload {
+  name: string
+  icon: string
+  description?: string
+}
+
+/** Immutable record of an agreed one-off schedule exception, stored directly on the message (no separate mutable status/table — the negotiation already happened in the preceding text bubbles). */
+export interface ScheduleChangePayload {
+  date: string
+  startHour: number
+  endHour: number
+  phoneAccess: 'available' | 'unavailable'
+  location: string
+  locationId?: string
+  activity: string
+  summary: string
+  startsAt?: number
+  endsAt?: number
+}
+
+export interface InternalTaskMessagePayload {
+  taskId: string
+  status: 'active' | 'reverted'
+  presentation: InternalTask['presentation']
+}
+
+export interface Message {
+  id: string
+  conversationId: string
+  role: MessageRole
+  type: MessageType
+  content: string // text content, sticker name, link/gift label
+  mentions?: string[] // group chats: contact ids explicitly @-mentioned by this message
+  replyToMessageId?: string // group chats: message id this message is replying to
+  link?: LinkPayload
+  gift?: GiftPayload
+  /** Remote stickers are stored on the message instead of being copied into the user's local sticker library. */
+  sticker?: { url: string; provider?: StickerProviderId }
+  image?: { assetId?: string; url?: string; caption?: string; photographer?: string; photographerUrl?: string; query?: string; provider?: ImageProviderId | 'pexels'; presentation?: 'sent' | 'illustration' }
+  scheduleChange?: ScheduleChangePayload
+  internalTask?: InternalTaskMessagePayload
+  groupPlanId?: string
+  finance?: FinanceMessagePayload
+  bubbleGroupId?: string // groups bubbles emitted from one AI response
+  speakerContactId?: string // group chats only: which member persona spoke this assistant bubble
+  debugAiTurnId?: string // admin mode only: links this bubble to the full AI turn debug payload
+  debugRawAiResponse?: string // admin mode only: raw JSON/text returned by the AI for the turn that produced this bubble
+  debugParsedBubble?: AiBubble | GroupAiBubble // admin mode only: parsed bubble payload used to render this message
+  thought?: string // AI's private thought for this turn — only shown when 读心 module is enabled
+  createdAt: number
+  pending?: boolean // true while an assistant bubble is still "typing" (not yet delivered)
+}
+
+export interface AiTurnDebug {
+  id: string
+  conversationId: string
+  raw: string
+  parsed: unknown
+  knowledgeQueries: string[]
+  promptTrace?: PromptTrace
+  createdAt: number
+}
+
+export type AiTestKind = 'conversation' | 'group' | 'moments' | 'sticker' | 'transfer' | 'gift' | 'image' | 'locationSchedule'
+export type AiTestExecutionMode = 'sequential' | 'isolated'
+export type AiTestSuiteStatus = 'draft' | 'running' | 'completed' | 'interrupted' | 'cancelled' | 'failed'
+export type AiTestCardStatus = 'pending' | 'running' | 'completed' | 'failed'
+
+export interface AiTestCardRecord {
+  id: string
+  order: number
+  description: string
+  userMessage: string
+  status: AiTestCardStatus
+  reply?: string
+  rawResponse?: string
+  context?: {
+    worldbookEntries: string[]
+    memorySummary: string
+    sections: Array<{ label: string; summary: string }>
+  }
+  error?: string
+  rating?: 'up' | 'down'
+  comment?: string
+  cloneContactIds?: string[]
+  cloneGroupId?: string
+  conversationId?: string
+  aiTurnId?: string
+  /** Full, persisted diagnostic material used by the administrator export. */
+  diagnostics?: {
+    mainPrompt?: string
+    conversionPrompt?: string
+    promptSections?: Array<{ label: string; content: string }>
+    parsedResponse?: unknown
+    actionCommittee?: unknown
+    locationSchedule?: {
+      before: Record<string, unknown>
+      after: Record<string, unknown>
+      addedScheduleOverrides: ScheduleOverride[]
+      /** Retained for reports created before the catalog moved to suite scope. */
+      locations?: Array<{ id: string; name: string; parentId?: string }>
+      currentLocationChange: {
+        beforeId?: string
+        beforeName?: string
+        afterId?: string
+        afterName?: string
+      }
+      scheduledTaskLocationChecks: Array<{
+        taskId: string
+        summary: string
+        startsAt: number
+        endsAt: number
+        expectedLocationId?: string
+        expectedLocationName?: string
+        resolvedLocationId?: string
+        resolvedLocationName?: string
+        matches: boolean
+      }>
+      checks: {
+        scheduleChanged: boolean
+        allLocationIdsValid: boolean
+        activeLocationMatchesTask: boolean
+        scheduledTasksResolveToExpectedLocations: boolean
+      }
+    }
+  }
+  completedAt?: number
+}
+
+/** Persisted human-review artifact. Sandbox contacts/conversations remain separate and hidden until an administrator removes them. */
+export interface AiTestSuiteRecord {
+  id: string
+  kind: AiTestKind
+  executionMode: AiTestExecutionMode
+  status: AiTestSuiteStatus
+  title: string
+  scenarioLabel: string
+  targetContactId?: string
+  targetGroupId?: string
+  targetLabel: string
+  targetSnapshot: unknown
+  /** Settings at generation time with credentials and large binary data removed. */
+  settingsSnapshot?: unknown
+  /** Shared test environment data, stored once instead of repeated on every card. */
+  environmentSnapshot?: {
+    locations?: Array<{ id: string; name: string; parentId?: string }>
+  }
+  cards: AiTestCardRecord[]
+  currentCardIndex?: number
+  error?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface PromptTrace {
+  sections: Array<{ label: string; content: string }>
+  worldbookMatches?: Array<{ id: string; title: string; score: number; chars: number }>
+  memorySummary?: string
+  traitSummary?: string
+  proactiveSource?: string
+  callIds?: string[]
+}
+
+export interface Sticker {
+  id: string
+  name: string
+  dataUrl: string
+  createdAt: number
+}
+
+export type StickerProviderId = 'none' | 'giphy' | 'klipy' | 'tenor' | 'custom'
+export type StickerContentRating = 'g' | 'pg' | 'pg-13' | 'r'
+export type ApiAuthMode = 'none' | 'bearer' | 'x-api-key' | 'query'
+
+export interface StickerProvidersSettings {
+  giphy: {
+    apiKey: string
+    rating: StickerContentRating
+    language: string
+  }
+  klipy: {
+    apiKey: string
+    contentFilter: 'off' | 'low' | 'medium' | 'high'
+    locale: string
+  }
+  tenor: {
+    apiKey: string
+    contentFilter: 'off' | 'low' | 'medium' | 'high'
+    locale: string
+  }
+  custom: {
+    endpoint: string
+    apiKey: string
+    authMode: ApiAuthMode
+    responsePath: string
+  }
+}
+
+export type ImageProviderId = 'none' | 'atlas' | 'novelai' | 'comfyui' | 'stable-diffusion' | 'custom'
+export type AtlasVisualStyle = 'asian-realistic' | 'european-realistic' | 'anime' | 'custom'
+
+export interface ImageProvidersSettings {
+  atlas: {
+    apiKey: string
+    baseUrl: string
+    model: string
+    size: string
+    promptPrefix: string
+    visualStyle: AtlasVisualStyle
+    customVisualStyle: string
+  }
+  novelai: {
+    apiKey: string
+    baseUrl: string
+    model: string
+    width: number
+    height: number
+    steps: number
+    scale: number
+    sampler: string
+    scheduler: string
+    negativePrompt: string
+    promptPrefix: string
+  }
+  comfyui: {
+    baseUrl: string
+    apiKey: string
+    authMode: 'none' | 'bearer' | 'x-api-key'
+    workflowMode: 'basic' | 'custom'
+    workflow?: Record<string, unknown>
+    workflowFileName?: string
+    workflowBindings?: {
+      positivePrompt?: { nodeId: string; inputName: string }
+      negativePrompt?: { nodeId: string; inputName: string }
+      seed?: { nodeId: string; inputName: string }
+      steps?: { nodeId: string; inputName: string }
+      cfg?: { nodeId: string; inputName: string }
+      sampler?: { nodeId: string; inputName: string }
+      scheduler?: { nodeId: string; inputName: string }
+      width?: { nodeId: string; inputName: string }
+      height?: { nodeId: string; inputName: string }
+      outputNodeId?: string
+      /** Legacy node-only bindings retained for settings saved by older builds. */
+      positivePromptNodeId?: string
+      negativePromptNodeId?: string
+      samplerNodeId?: string
+      latentNodeId?: string
+    }
+    workflowOverrides: {
+      negativePrompt: boolean
+      seed: boolean
+      steps: boolean
+      cfg: boolean
+      sampler: boolean
+      scheduler: boolean
+      width: boolean
+      height: boolean
+    }
+    model: string
+    width: number
+    height: number
+    steps: number
+    cfg: number
+    sampler: string
+    scheduler: string
+    negativePrompt: string
+    promptPrefix: string
+    timeoutSeconds: number
+  }
+  stableDiffusion: {
+    baseUrl: string
+    username: string
+    password: string
+    model: string
+    width: number
+    height: number
+    steps: number
+    cfg: number
+    sampler: string
+    negativePrompt: string
+    promptPrefix: string
+  }
+  custom: {
+    endpoint: string
+    apiKey: string
+    method: 'GET' | 'POST'
+    authMode: ApiAuthMode
+    bodyTemplate: string
+    responsePath: string
+  }
+}
+
+/** A purchased shop item sitting in the user's warehouse until used or gifted away. */
+export interface InventoryItem {
+  id: string
+  /** Stable identity for stacking purchases of the same generated product. */
+  productKey?: string
+  name: string
+  description: string
+  icon: string // emoji
+  price: number // what it cost, kept for reference
+  /** Legacy rows omit this and count as one item. Zero is retained for repurchase. */
+  quantity?: number
+  acquiredAt: number
+  updatedAt?: number
+}
+
+export type SpeechProviderId = 'none' | 'doubao' | 'mimo'
+
+export interface ContactSpeechVoice {
+  voiceId: string
+  /** Provider-specific performance direction; currently used by MiMo. */
+  styleInstruction?: string
+  source: 'ai' | 'user'
+  assignedAt: number
+}
+
+export interface SpeechProvidersSettings {
+  doubao: {
+    baseUrl: string
+    authMode: 'apiKey' | 'accessKey'
+    apiKey: string
+    appId: string
+    accessKey: string
+    resourceId: string
+    speaker: string
+    format: 'mp3' | 'ogg_opus'
+    sampleRate: 8000 | 16000 | 24000
+    speedRatio: number
+    loudnessRatio: number
+    emotion: string
+    emotionScale: number
+  }
+  mimo: {
+    baseUrl: string
+    apiKey: string
+    model: 'mimo-v2.5-tts'
+    voice: string
+    format: 'mp3' | 'wav'
+    styleInstruction: string
+    temperature: number
+  }
+}
+
+/** Regenerable TTS output. Kept outside messages and normal backups so large audio blobs remain disposable. */
+export interface SpeechCacheRecord {
+  id: string // message id
+  messageId: string
+  signature: string
+  provider: Exclude<SpeechProviderId, 'none'>
+  mimeType: string
+  audio: Blob
+  size: number
+  durationMs?: number
+  createdAt: number
+  lastAccessedAt: number
+}
+
+/** Durable catalogue used by the shop's repurchase view. */
+export interface ShopPurchaseHistory {
+  productKey: string
+  name: string
+  description: string
+  icon: string
+  price: number
+  purchaseCount: number
+  firstPurchasedAt: number
+  lastPurchasedAt: number
+}
+
+export interface AlbumSavedImage {
+  url: string
+  createdAt: number
+  source: '动漫图库' | 'Pexels 实拍图' | '生图系统'
+  caption?: string
+}
+
+export interface AppSettings {
+  experienceMode: ContactGenerationExperienceMode
+  aiProvider: import('../lib/aiProviders').AiProviderId
+  apiKey: string
+  baseUrl: string
+  model: string
+  utilityModel: string // model for secondary tasks: shop generation, warmth scoring / memory updates, worldview drafts, etc.
+  actionDecisionProvider?: 'llm' | 'jev'
+  actionDecisionApiKey?: string
+  /** Saved AI endpoints. Legacy fields above mirror the selected item for older call sites. */
+  aiApiConfigs: AiApiConfig[]
+  /** The only AI endpoint used until the user selects another configuration. */
+  activeAiApiConfigId: string
+  globalSystemPrompt: string
+  /** Global, user-editable original prompt templates shared by all relevant model calls. */
+  promptModules: PromptModuleSettings
+  /** Named fixed-prompt archives. Contacts receive independent snapshots when created/applied. */
+  promptPresets: PromptPreset[]
+  /** Archive copied into newly-created contacts by default. */
+  activePromptPresetId: string
+  userNickname: string
+  userAvatar: string
+  userGender: string
+  userBirthday: string // "YYYY-MM-DD", empty if unset
+  userBio: string
+  userVisualIdentity?: string
+  userVisualSeed?: number
+  /** @deprecated Legacy pre-ledger balance. Runtime balance lives in walletAccounts. */
+  walletBalance: number
+  userOccupation: string
+  userMonthlySalary: number
+  userJobStartedDate?: string
+  userLastSalaryDate?: string
+  jobBabyMode: boolean
+  walletMigrated?: boolean
+  momentsCoverPhoto: string // data URL for the 朋友圈 page's cover banner, empty until the user sets one
+  momentsLastReadAt?: number // updated when the user opens MomentsPage; drives Discover red dots
+  // ---- autonomous behavior (see lib/proactiveChat.ts) ----
+  // Master switch moved to enabledModules['proactiveChat'] — see src/features/proactiveChat.ts
+  proactiveMessageLog?: { date: string; count: number } // rolling daily counter backing the global cap on proactive chat-opens, keyed by local date
+  // was a hardcoded const in lib/proactiveChat.ts, moved to user-configurable settings (with the same defaults) — see SettingsPage's "AI自主行为" section
+  proactiveDailyCap: number // max proactive chat-opens per day, all contacts combined
+  proactiveProbability: number // 0-1, per-tick chance anything happens at all even when someone's eligible
+  proactiveSilenceThresholdMs: number // a conversation must have been quiet at least this long to make its contact eligible
+  proactiveCooldownMs: number // a contact won't proactively message again until this long has passed since their last one
+  proactiveMomentsMax: number // max moments to auto-post per background tick (default 3)
+  proactiveTickIntervalMs: number // how often the background timer fires (default 5 min)
+  /** 0 = unlimited. Only automatic/background AI work counts against this daily cap. */
+  automaticAiDailyCap: number
+  // ---- personal schedule + small assistant (see lib/assistant.ts) ----
+  /** The single contact currently acting as the user's small assistant; empty = none. */
+  assistantContactId: string
+  /** When the current assistant took over — past days before this are not auto-backfilled. */
+  assistantSince: number
+  /** Default lead time for a new "需要提醒" activity, in minutes. */
+  assistantDefaultRemindMinutes: number
+  /** User-editable instruction used to generate each reminder message. */
+  assistantReminderPrompt: string
+  /** User-editable instruction used to write the daily diary. */
+  assistantDiaryPrompt: string
+  /** Last day the "change tomorrow's assistant?" notification was already shown. */
+  assistantChangePromptDate: string
+  // ---- web search (see lib/webSearch.ts) ----
+  tavilyApiKey: string // used only by the knowledge-base refresh job, not live during normal chat
+  // ---- photo avatars/moments images (see lib/photoSearch.ts) ----
+  pexelsApiKey: string
+  /** Waifu.im permits adult-only images only when this explicit setting is enabled. */
+  animeNsfwEnabled: boolean
+  /** The source used when a newly generated contact needs an automatic avatar. */
+  avatarImageSource: 'pexels' | 'anime' | 'generated'
+  /** The single user-controlled source for automatically attached Moments images. */
+  momentsImageSource: 'pexels' | 'anime' | 'generated'
+  /** URLs hidden by the user from the in-app album without changing their original chat or moment. */
+  hiddenAlbumUrls?: string[]
+  /** Standalone previews explicitly saved into the album, before they are used by a chat or moment. */
+  albumSavedImages?: AlbumSavedImage[]
+  stickerProvider: StickerProviderId
+  stickerProviders: StickerProvidersSettings
+  imageProvider: ImageProviderId
+  imageProviders: ImageProvidersSettings
+  speechProvider: SpeechProviderId
+  speechProviders: SpeechProvidersSettings
+  /** Legacy generic settings retained only so version-8 installs can migrate into the new custom providers. */
+  stickerApiUrl?: string
+  stickerApiKey?: string
+  imageApiUrl?: string
+  imageApiKey?: string
+  imageApiResponsePath?: string
+  // ---- worldview (see lib/prompt.ts buildWorldviewDraftPrompt) ----
+  worldview: string // shared world-setting text injected into every persona's prompt (chat, group chat, moments) once confirmed; empty until the user sets one
+  worldbookMigrationCompleted?: boolean
+  /** Default for new contacts and unbound generation surfaces; existing contacts keep their own world. */
+  defaultWorldviewId?: string
+  /** The only world currently materialized in the live tables. */
+  activeWorldId?: string
+  /** Completed version of the legacy multi-world-to-snapshot migration. */
+  worldSnapshotMigrationVersion?: number
+  /** When true, economy, inventory, career and shop state are stored per world. */
+  worldEconomyIsolated?: boolean
+  /** Compress a single library source only when it exceeds this threshold. */
+  autoCompressLibraryImports?: boolean
+  libraryCompressionThresholdTokens?: number
+  // ---- knowledge base (see lib/knowledgeBase.ts) ----
+  knowledgeQueryLog?: { date: string; count: number } // rolling daily counter backing the cap on reactive keyword-triggered knowledge lookups, keyed by local date
+  // ---- admin/dev tooling (see lib/consoleCapture.ts + SkyEyePage) ----
+  adminModeEnabled: boolean
+  // ---- appearance ----
+  uiTheme?: 'sage' | 'forge' | 'fox' | 'ink' | 'nord' | 'wetalk'
+  themeMode?: 'light' | 'dark'
+  topInsetAdjustmentPx: number
+  chatBackground?: string // empty = default; otherwise a CSS color or data URL used behind chat messages
+  /** Number of messages fetched initially and per older-message page. */
+  chatPageSize: number
+  currencyIconMode?: 'coin' | 'emoji' | 'yen' | 'dollar'
+  customCurrencyEmoji?: string
+  animationsEnabled?: boolean
+  /** How long an AI mood lasts before expiring (ms). Default 30 min. */
+  moodExpiryMs: number
+  /** Maximum time to wait for a chat reply before cancelling it. 0 disables the limit. */
+  chatResponseTimeoutMs: number
+  /** Feature-module toggles — see src/features/. Every module id listed here is active. */
+  enabledModules: string[]
+}
+
+export type PromptModuleId =
+  | 'chat'
+  | 'relationship'
+  | 'memory'
+  | 'worldview'
+  | 'moments'
+  | 'knowledgeBase'
+  | 'nuwaMode'
+  | 'career'
+  | 'shop'
+
+export interface PromptModuleConfig {
+  enabled: boolean
+  templates: Record<string, string>
+}
+
+export type PromptModuleSettings = Record<PromptModuleId, PromptModuleConfig>
+
+/** Optional decoding controls stored alongside an API configuration. */
+export interface SamplingParameters {
+  temperature?: number
+  topP?: number
+  topK?: number
+}
+
+export interface AiApiConfig {
+  id: string
+  name: string
+  provider: import('../lib/aiProviders').AiProviderId
+  apiKey: string
+  baseUrl: string
+  model: string
+  utilityModel: string
+  sampling?: SamplingParameters
+  createdAt: number
+  updatedAt: number
+}
+
+export interface PromptPreset {
+  id: string
+  name: string
+  modules: PromptModuleSettings
+  systemDefault?: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export interface AdminLogRecord { id: string; level: 'log' | 'info' | 'warn' | 'error'; message: string; createdAt: number }
+export type AdminAiTraceStage = 'original_generation' | 'tool_call' | 'review_and_repair' | 'json_translation' | 'image_generation' | 'sticker_lookup' | 'schedule_change' | 'location_change' | 'clothing_change' | 'first_chat' | 'first_quality' | 'second_chat' | 'other' | 'second_quality'
+/** A single timeline includes model calls and deterministic follow-up work. */
+export interface AdminAiTrace { id: string; purpose: AiUsagePurpose; model: string; messages: { role: string; content: string }[]; output?: string; error?: string; inputTokens: number; outputTokens: number; durationMs?: number; createdAt: number; turnId?: string; stage?: AdminAiTraceStage; conversationId?: string; diagnostics?: Record<string, unknown> }
+export interface SaveSlot { id: string; slot: number; name: string; createdAt: number; updatedAt: number; snapshot: unknown }
+
+/** A contact-owned story branch.  The active branch is the one currently used by chat. */
+export interface ContactStoryline {
+  id: string
+  contactId: string
+  worldviewId?: string
+  name: string
+  active: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+/** Everything that may safely roll back for one contact without touching other contacts. */
+export interface ContactSaveSnapshotData {
+  contact: Contact
+  conversation?: Conversation
+  messages: Message[]
+  memories: ContactMemory[]
+  mediaAssets?: MediaAsset[]
+}
+
+export interface ContactSaveSnapshot {
+  id: string
+  contactId: string
+  storylineId: string
+  name: string
+  kind: 'manual' | 'automatic'
+  createdAt: number
+  snapshot: ContactSaveSnapshotData
+}
+
+/** Version history for globally shared worldbooks and the shared map. */
+export interface GlobalSaveSnapshot {
+  id: string
+  resourceType: 'worldbook' | 'map'
+  resourceId: string
+  name: string
+  kind: 'manual' | 'automatic'
+  createdAt: number
+  snapshot: unknown
+}
+
+export type WorldSnapshotKind = 'manual' | 'automatic'
+
+/** Compatibility index for per-world mutable fields. Complete world-local
+ * contacts are stored in world snapshots and materialized when switching. */
+export interface WorldContactState {
+  id: string
+  worldId: string
+  contactId: string
+  schemaVersion: number
+  state: Partial<Contact>
+  updatedAt: number
+}
+
+export interface WorldSnapshotData {
+  schemaVersion: number
+  /** Complete contacts belonging to this world when the backup was created. */
+  contacts?: Contact[]
+  contactIds?: string[]
+  contactStates?: Record<string, Partial<Contact>>
+  tables: Record<string, unknown[]>
+  /** Legacy v1 payload only. Worldview data is ignored during normal restore. */
+  world?: WorldbookCollection
+  /** Legacy v1 payload only. New backups never duplicate worldview entries. */
+  worldbookEntries?: WorldbookEntry[]
+  /** User economy/career settings are included only when per-world economy is enabled. */
+  economySettings?: Pick<AppSettings, 'userOccupation' | 'userMonthlySalary' | 'userJobStartedDate' | 'userLastSalaryDate'>
+}
+
+/** A restorable backup of one world's contacts and story state. Worldview
+ * entries remain independent and are never rolled back by reading a backup. */
+export interface WorldSnapshot {
+  id: string
+  worldId: string
+  name: string
+  kind: WorldSnapshotKind
+  createdAt: number
+  updatedAt: number
+  contentHash: string
+  contactCount: number
+  estimatedWorldviewTokens: number
+  snapshotVersion: number
+  snapshot: WorldSnapshotData
+}
+
+export type WalletOwnerId = string
+export type WalletTransactionKind = 'migration' | 'salary' | 'purchase' | 'transfer' | 'red_packet' | 'loan' | 'repayment' | 'admin_adjustment'
+export interface WalletAccount { ownerId: WalletOwnerId; balance: number; updatedAt: number }
+export interface WalletTransaction {
+  id: string; idempotencyKey?: string; kind: WalletTransactionKind; fromOwnerId?: WalletOwnerId; toOwnerId?: WalletOwnerId
+  amount: number; note?: string; status: 'completed' | 'reserved' | 'cancelled'; createdAt: number; completedAt?: number
+}
+export interface Loan {
+  id: string; lenderId: WalletOwnerId; borrowerId: WalletOwnerId; principal: number; outstanding: number
+  note?: string; status: 'pending' | 'active' | 'rejected' | 'repaid'; createdAt: number; resolvedAt?: number
+}
+export interface FinanceMessagePayload {
+  transactionId?: string; loanId?: string; amount: number; note?: string
+  status?: 'pending' | 'completed' | 'claimed' | 'accepted' | 'rejected' | 'repaid'
+}
+export type JobDifficulty = '入门' | '普通' | '竞争激烈'
+export interface JobListing {
+  id: string; company: string; title: string; description: string; responsibilities: string[]; requirements: string[]
+  monthlySalary: number; difficulty: JobDifficulty; interviewer: string
+  status: 'open' | 'interviewing' | 'hired' | 'rejected'; sourceQuery?: string; createdAt: number; hiredBySkip?: boolean
+}
+export interface InterviewMessage { role: 'interviewer' | 'candidate'; content: string; createdAt: number }
+export interface InterviewSession {
+  id: string; jobId: string; status: 'active' | 'passed' | 'failed'; round: number; messages: InterviewMessage[]
+  score?: number; scoreBreakdown?: Record<string, number>; feedback?: string; createdAt: number; updatedAt: number
+}
+
+/** A dated fact about current internet culture (memes/anime/games), gathered by the knowledge-base refresh job — see lib/knowledgeBase.ts. */
+export interface KnowledgeEntry {
+  id: string
+  topic: string // LLM-generated short headline for this specific fact (e.g. "匹诺康尼剧情") — NOT the same as the search query that produced it, don't dedup against this
+  content: string
+  sourceQuery: string // the original search keyword/topic (e.g. "崩坏：星穹铁道") — this is what dedup compares against, since `topic` is an unrelated sub-headline the model invents per fact
+  fetchedAt: number // when this was gathered — surfaced in prompts so the model knows how fresh it is
+}
+
+export type LibrarySourceType = 'character-card' | 'worldbook' | 'web' | 'manual' | 'legacy'
+
+/** Source material kept verbatim. Library content is reference material, never canon by itself. */
+export interface LibraryItem {
+  id: string
+  packageId?: string
+  parentId?: string
+  sourceType: LibrarySourceType
+  title: string
+  content: string
+  keywords: string[]
+  sourceLabel?: string
+  sourceFileName?: string
+  sourceUrl?: string
+  fetchedAt?: number
+  rawData?: Record<string, unknown>
+  createdAt: number
+  updatedAt: number
+  lastUsedAt?: number
+}
+
+/** Legacy saved whole-world snapshots retained for backup compatibility; new settings use WorldbookEntry. */
+export interface SavedWorldview {
+  id: string
+  name: string
+  content: string
+  createdAt: number
+}
+
+// ---- Structured memory (see lib/memory.ts) ----
+
+/** Category bucket for a single memory item — maps roughly to what the item is *about*. */
+export type MemoryCategory =
+  | '关系动态'   // Relationship dynamics
+  | '话题历史'   // Topic history
+  | '基础信息'   // Basic info
+  | '偏好习惯'   // Preferences / habits
+  | '人格特质'   // Personality traits
+  | '重要事件'   // Important events
+  | '四季日常'   // Daily life / seasonal
+
+/** Granular kind tag for a single memory item — more specific than category. */
+export type MemoryKind =
+  | 'general'
+  | 'user_fact'
+  | 'user_preference'
+  | 'relationship_event'
+  | 'character_promise'
+  | 'open_thread'
+  | 'world_state'
+
+export type ContactMemoryScope = 'private' | 'group' | 'interpersonal'
+
+/** One structured fact / observation extracted from a conversation and stored in its own row. */
+export interface ContactMemory {
+  id: string
+  contactId: string
+  /** private=和用户私聊/普通个人记忆；group=群聊交流记忆；interpersonal=AI和其他AI之间的共同经历/关系记忆 */
+  scope?: ContactMemoryScope
+  groupId?: string
+  relatedContactIds?: string[]
+  category: MemoryCategory
+  kind: MemoryKind
+  content: string
+  tags: string[]
+  importance: number        // 0-1
+  emotionalWeight: number   // 0-1
+  confidence: number        // 0-1
+  sourceConversationId?: string
+  sourceMessageIds: string[]
+  createdAt: number
+  updatedAt: number
+  lastUsedAt?: number
+  usageCount: number
+}
+
+// ---- AI JSON output protocol ----
+export interface AiBubbleText {
+  type: 'text'
+  content: string
+}
+export interface AiBubbleSticker {
+  type: 'sticker'
+  name: string
+}
+export interface AiBubbleLink {
+  type: 'link'
+  app: string
+  label: string
+  data?: Record<string, unknown>
+}
+/** Emitted when the AI agrees to (or itself proposes) a one-off exception to its normal schedule — the negotiation itself happens in plain text bubbles beforehand; this is just the structured record of what was agreed. 1:1 only, not supported in the (deliberately simpler) group chat protocol. */
+export interface AiBubbleScheduleChange {
+  type: 'scheduleChange'
+  date: string // "YYYY-MM-DD"
+  startHour: number
+  endHour: number
+  phoneAccess: 'available' | 'unavailable'
+  location: string
+  /** Canonical leaf location selected by the raw schedule marker. */
+  locationId?: string
+  activity: string
+  summary: string
+}
+export interface AiBubbleFinance {
+  type: 'transfer' | 'redPacket' | 'loanRequest' | 'loanDecision' | 'giftPurchase'
+  amount: number
+  note?: string
+  loanId?: string
+  decision?: 'accept' | 'reject'
+  name?: string
+  icon?: string
+  description?: string
+}
+
+export interface WorldbookEntry {
+  id: string
+  collectionId: string
+  title: string
+  content: string
+  keywords: string[]
+  enabled: boolean
+  /** @deprecated Legacy backup compatibility only. Empty keywords now mean the entry is always active. */
+  alwaysInclude?: boolean
+  foundationalWorldview?: boolean
+  priority: number
+  sourceEntryId?: string
+  sourceOrder?: number
+  rawData?: Record<string, unknown>
+  createdAt: number
+  updatedAt: number
+}
+
+export type WorldbookSourceType = 'manual' | 'sillytavern' | 'character-card' | 'novelai' | 'risu' | 'agnai' | 'generic'
+
+export interface WorldbookCollection {
+  id: string
+  name: string
+  enabled: boolean
+  sourceType: WorldbookSourceType
+  sourceFileName?: string
+  sourceLabel?: string
+  createdAt: number
+  updatedAt: number
+}
+
+export type LifeEventVisibility = 'private' | 'related' | 'public'
+export type LifeEventType = 'routine' | 'work' | 'social' | 'mood' | 'goal' | 'summary'
+
+export interface SimulationState {
+  id: 'global'
+  lastSimulatedAt: number
+  seed: string
+  version: number
+  lastStatus?: string
+}
+
+export interface ContactLifeState {
+  contactId: string
+  location: string
+  activity: string
+  energy: number
+  stress: number
+  socialNeed: number
+  currentGoal?: string
+  situation?: string
+  updatedAt: number
+}
+
+export interface LifeEvent {
+  id: string
+  contactId: string
+  type: LifeEventType
+  summary: string
+  details?: string
+  participantContactIds: string[]
+  visibility: LifeEventVisibility
+  importance: number
+  occurredAt: number
+  expiresAt?: number
+  surfacedAsMessage?: boolean
+  surfacedAsMoment?: boolean
+}
+
+export type ContactExperienceKind = 'past' | 'offline'
+export type ContactExperienceMemoryTier = 'short' | 'long'
+export type ContactExperienceSource = 'user' | 'worldbook' | 'relationship' | 'persona' | 'simulation'
+
+/** A concrete part of a character's life. Shared events have multiple contactIds. */
+export interface ContactExperience {
+  id: string
+  contactIds: string[]
+  kind: ContactExperienceKind
+  memoryTier: ContactExperienceMemoryTier
+  title: string
+  summary: string
+  details?: string
+  periodLabel?: string
+  startedAt?: number
+  endedAt?: number
+  location?: string
+  importance: number // 0..100
+  sources: ContactExperienceSource[]
+  sourceRefIds?: string[]
+  createdAt: number
+  expiresAt?: number
+  surfacedAsMoment?: boolean
+}
+
+export type AiUsagePurpose = 'chat' | 'proactive' | 'memory' | 'moments' | 'worldbook' | 'offlineState' | 'persona' | 'quality' | 'other'
+
+export interface AiUsageRecord {
+  id: string
+  purpose: AiUsagePurpose
+  model: string
+  automatic: boolean
+  success: boolean
+  inputTokens: number
+  outputTokens: number
+  estimated: boolean
+  createdAt: number
+  error?: string
+}
+
+export interface CustomWarmthRule {
+  id: string
+  minWarmth: number
+  maxWarmth: number
+  positiveMultiplier: number
+  negativeMultiplier: number
+  prompt: string
+}
+
+export interface CustomPersonalityTrait {
+  id: string
+  name: string
+  meaning: string
+  rules: CustomWarmthRule[]
+}
+
+export interface ContactCreatorProfile {
+  personalityTendencies: string[]
+  age: string
+  gender: string
+  relationship: string
+  occupation: string
+  hobbies: string[]
+  notes: string
+  sharedHistory?: string
+}
+
+export interface SavedPersona {
+  id: string
+  name?: string
+  nickname?: string
+  realName?: string
+  birthday?: string
+  createdAt: number
+  updatedAt: number
+  profile: ContactCreatorProfile
+  personaConstraints?: string
+  sharedHistory?: string
+  customPersonalityTraits?: CustomPersonalityTrait[]
+  initialWarmth?: number
+  initialWarmthMode?: 'auto' | 'custom' | 'ai'
+}
+
+/**
+ * Snapshot of a persona creation. Unlike SavedPersona (which is a
+ * user-managed draft library and participates in ordinary backups), creation
+ * records survive contact deletion and save rollback unless the user
+ * explicitly removes one. They are intentionally kept separate from Contact.
+ */
+export interface PersonaCreationRecord {
+  id: string
+  sourceContactId?: string
+  name: string
+  realName?: string
+  nickname?: string
+  birthday?: string
+  gender?: string
+  ageRange?: string
+  relationship?: string
+  occupation?: string
+  personalityTrait?: string
+  initialWarmth?: number
+  hobbies: string[]
+  /** The permanent, user-authored role setting shown in Nuwa mode. */
+  personaSetting: string
+  /** The short direction/role description entered before the setting. */
+  roleDescription?: string
+  persona: string
+  visualIdentity?: string
+  personaProfile?: PersonaProfile
+  speechSamples?: string[]
+  mbti?: string
+  schedule?: ScheduleBlock[]
+  wardrobe?: ClothingDraftItem[]
+  currentOutfit?: string[]
+  avatarKeyword?: string
+  monthlySalary?: number
+  sharedHistory?: string
+  createdAt: number
+}
+
+export type ContactGenerationExperienceMode = 'immersive' | 'free'
+export type ContactGenerationMethod = 'discovery' | 'precision'
+export type ContactGenerationStatus =
+  | 'queued'
+  | 'preparing'
+  | 'retrieving_context'
+  | 'extracting_canon'
+  | 'generating'
+  | 'validating'
+  | 'fetching_avatar'
+  | 'awaiting_review'
+  | 'committing'
+  | 'completed'
+  | 'failed'
+  | 'paused'
+  | 'cancelled'
+
+export interface ContactGenerationRelationInput {
+  targetContactId: string
+  label: ContactRelationLabel
+}
+
+/** Serializable creation request. Credentials are deliberately never persisted here. */
+export interface ContactGenerationInput {
+  personalityTags: string[]
+  ageRange: string
+  gender: string
+  relationship: string
+  occupation: string
+  hobbies: string[]
+  personalityTrait: string
+  personalityTraitContent?: string
+  roleDescription: string
+  personaSetting: string
+  sharedHistory: string
+  realName?: string
+  nickname?: string
+  birthday?: string
+  avatar: string
+  avatarManuallySet: boolean
+  initialWarmthMode: 'auto' | 'custom' | 'ai'
+  initialWarmth?: number
+  customPersonalityTraits?: CustomPersonalityTrait[]
+  relations: ContactGenerationRelationInput[]
+  worldviewId?: string
+  selectedWorldbookEntryIds: string[]
+  importedWorldbook?: { collection: WorldbookCollection; entries: WorldbookEntry[] }
+  importedFirstMessage?: string
+  careerEnabled: boolean
+  relationshipEnabled: boolean
+  locationEnabled: boolean
+  /** Present only when this generation was started from an in-chat recommendation card. */
+  recommendation?: {
+    sourceMessageId: string
+    recommenderContactId: string
+    recommenderName: string
+    acceptedAt: number
+  }
+}
+
+export interface ContactGenerationError {
+  code: string
+  stage: ContactGenerationStatus
+  message: string
+  technicalMessage: string
+  retryable: boolean
+  attempt: number
+  provider?: string
+  model?: string
+  httpStatus?: number
+  finishReason?: string
+  responseChars?: number
+  failedFields?: string[]
+  /** Structured, privacy-safe explanation of persona output validation. */
+  validation?: ContactGenerationValidationDiagnostics
+  occurredAt: number
+}
+
+export type ContactGenerationValidationCode =
+  | 'empty_output' | 'json_truncated' | 'json_invalid'
+  | 'required_field_missing' | 'required_field_invalid'
+
+export interface ContactGenerationValidationIssue {
+  code: ContactGenerationValidationCode
+  field?: string
+  message: string
+}
+
+export interface ContactGenerationValidationDiagnostics {
+  outputChars: number
+  jsonState: 'valid' | 'empty' | 'truncated' | 'invalid'
+  issues: ContactGenerationValidationIssue[]
+  repairAttempted?: boolean
+  repair?: Omit<ContactGenerationValidationDiagnostics, 'repairAttempted' | 'repair'>
+}
+
+/** Persisted job shown in the contact list until it becomes a real contact. */
+export interface ContactGenerationTask {
+  id: string
+  experienceMode: ContactGenerationExperienceMode
+  method: ContactGenerationMethod
+  status: ContactGenerationStatus
+  stageLabel: string
+  input: ContactGenerationInput
+  provider: import('../lib/aiProviders').AiProviderId
+  baseUrl: string
+  model: string
+  utilityModel: string
+  promptModulesSnapshot?: PromptModuleSettings
+  promptPresetSourceId?: string
+  promptPresetSourceName?: string
+  partialFields?: Record<string, unknown>
+  worldbookText?: string
+  canon?: unknown
+  rawOutput?: string
+  /** Short, user-visible milestones from native persona tool generation. */
+  generationActivity?: string[]
+  validationRepairAttempted?: boolean
+  validationDiagnostics?: ContactGenerationValidationDiagnostics
+  personaDraft?: import('../lib/prompt').PersonaGenerationResult
+  finalAvatar?: string
+  avatarPhotographer?: string
+  avatarPhotographerUrl?: string
+  resultContactId?: string
+  error?: ContactGenerationError
+  attempt: number
+  createdAt: number
+  updatedAt: number
+  startedAt?: number
+  completedAt?: number
+}
+
+export interface ProactiveTopicRecord {
+  topic: string
+  source: 'event' | 'open_thread' | 'memory' | 'plan' | 'schedule' | 'career' | 'casual'
+  createdAt: number
+}
+export type AiImageKind = 'selfie' | 'portrait' | 'group' | 'scene' | 'object'
+export interface AiBubbleImage { type: 'image'; query: string; scene?: string; kind?: AiImageKind; aspectRatio?: AiImageAspectRatio; participants?: Array<'self' | 'user'>; caption?: string }
+export type AiBubble = AiBubbleText | AiBubbleSticker | AiBubbleImage | AiBubbleLink | AiBubbleScheduleChange | AiBubbleFinance
+
+export interface AiResponse {
+  messages: AiBubble[]
+  /** Short emotional-state summary the model assesses about itself this turn. Required. */
+  mood: string
+  /** Private thought — what the AI really thinks vs what it says. Required. */
+  thought: string
+  /** Sibling of `messages`, not a bubble — up to 2 short topics the model wants the knowledge base to look up (see lib/knowledgeBase.ts), e.g. a slang term the user just used that it doesn't recognize. Optional; most turns won't set this. */
+  knowledgeQueries?: string[]
+  outfitChanges?: OutfitChangeAction[]
+}
+
+// ---- group chat AI output protocol (see lib/groupChat.ts) ----
+// Deliberately a smaller protocol than 1:1 (text/sticker only, no
+// link) to keep the multi-persona prompt tractable.
+export interface GroupAiBubbleText {
+  speakerIndex: number // 1-based index into that turn's selected-speakers list
+  speakerName?: string // debug/conversion hint only; speakerIndex remains authoritative
+  type: 'text'
+  content: string
+  thought?: string
+  mood?: string
+}
+export interface GroupAiBubbleSticker {
+  speakerIndex: number
+  speakerName?: string
+  type: 'sticker'
+  name: string
+  thought?: string
+  mood?: string
+}
+export interface GroupAiBubbleImage { speakerIndex: number; speakerName?: string; type: 'image'; query: string; scene?: string; kind?: AiImageKind; aspectRatio?: AiImageAspectRatio; participantIndexes?: number[]; includeUser?: boolean; caption?: string; thought?: string; mood?: string }
+/** A speaker can only create a schedule card for themselves. */
+export interface GroupAiBubbleScheduleChange { speakerIndex: number; speakerName?: string; type: 'scheduleChange'; date: string; startHour: number; endHour: number; phoneAccess: 'available' | 'unavailable'; location: string; locationId?: string; activity: string; summary: string; thought?: string; mood?: string }
+export type GroupAiBubble = GroupAiBubbleText | GroupAiBubbleSticker | GroupAiBubbleImage | GroupAiBubbleScheduleChange
+
+export interface GroupAiResponse {
+  messages: GroupAiBubble[]
+  turnSummary?: string
+  planCandidates?: { title: string; summary: string; participantIndexes: number[]; location?: string }[]
+  memoryCandidates?: { contactName: string; content: string }[]
+  knowledgeQueries?: string[]
+  outfitChanges?: Array<OutfitChangeAction & { speakerIndex: number }>
+}

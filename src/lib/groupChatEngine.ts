@@ -1,0 +1,981 @@
+import { v4 as uuid } from 'uuid'
+import { db } from '../db/db'
+import { chatCompletionText as chatCompletion, coalesceConsecutiveRoles, type ChatMessage } from './deepseek'
+import {
+  buildGroupRawChatPrompt,
+  buildLocationRawChatPrompt,
+  groupTypingDelayMs,
+  parseGroupAiResponse,
+  pickSociallyConnectedSpeakers,
+  selectGroupImageParticipantIds,
+  stripSpeakerNamePrefix,
+} from './groupChat'
+import { parseJsonLoose } from './aiProtocol'
+import { CONTEXT_WINDOW_SIZE, maybeUpdateGroupMemory, nonGroupScopedMemoriesText } from './memory'
+import { aiRelationshipPrompt } from './contactRelations'
+import { resolveKnowledgeQueries } from './knowledgeBase'
+import { isModuleEnabled } from '../features'
+import { describeCurrentTime } from './time'
+import { displayName } from './contact'
+import { previewForMessage } from './messagePreview'
+import { buildUserProfileText, nextMessageTimestamp, useChatEngineStore } from './chatEngine'
+import { reviewTurnLogic } from './turnLogicReviewer'
+import { buildDirectGroupOutputInstruction, parseDirectOutputReview } from './directOutput'
+import { trackRemoteStickerSend } from './remoteMedia'
+import { resolveBubbleMedia } from './bubbleMedia'
+import { createTurnController, revealSequentially } from './conversationRuntime'
+import { isImageProviderReady, isStickerProviderReady } from './mediaProviders'
+import { realSeason, resolveLocationParticipants, syncContactLocationsAt, type LocationParticipants } from './locations'
+import { recentSocialEventsText, recordSocialEvent } from './socialEvents'
+import { recentSharedOriginalContext } from './sharedRecentContext'
+import { createGroupPlan, planCardMessage } from './groupPlans'
+import { useChatUiStore } from '../store/useChatUiStore'
+import { retrieveWorldbookContext } from './worldbook'
+import { featureActive, promptModuleEnabled } from './promptModules'
+import { applyOutfitChange } from './clothing'
+
+function groupMessageBounds(level: import('../types').GroupEnergyLevel, speakerCount: number): { min: number; max: number } {
+  const speakers = Math.max(1, speakerCount)
+  if (level === 'cold') return { min: 1, max: Math.min(3, speakers + 1) }
+  if (level === 'lively') return { min: Math.min(6, Math.max(3, speakers + 1)), max: Math.min(12, Math.max(6, speakers * 3)) }
+  return { min: Math.min(3, Math.max(2, speakers)), max: Math.min(7, Math.max(4, speakers * 2)) }
+}
+
+interface ImmediateLocationRequest {
+  locationId: string
+  locationName: string
+}
+
+export function findImmediateLocationRequest(userText: string, locations: Array<{ id: string; name: string }>): ImmediateLocationRequest | undefined {
+  if (!/(?:现在|立刻|马上|这就|赶紧|去|到|进|回|让.{0,8}去|叫.{0,8}去)/.test(userText)) return undefined
+  const exact = locations.find((location) => location.name.length >= 2 && userText.includes(location.name))
+  if (exact) return { locationId: exact.id, locationName: exact.name }
+
+  // Custom rooms are often named “我的卧室” or “主卧室”, while the user
+  // naturally says only “回卧室”. Resolve the noun after a movement verb
+  // against containing custom location names instead of requiring the full
+  // configured display name verbatim.
+  const phrase = userText.match(/(?:前往|移动到|回到|进入|去到|到|进|回|去)([^，。！？!?\s]{2,16})/)?.[1]
+    ?.replace(/(?:睡觉|休息|待着|等着|一下|一趟|吧|了|去)+$/, '')
+  const target = phrase
+    ? locations
+        .filter((location) => location.name.length >= 2 && (location.name.includes(phrase) || phrase.includes(location.name)))
+        .sort((a, b) => Math.abs(a.name.length - phrase.length) - Math.abs(b.name.length - phrase.length))[0]
+    : undefined
+  return target ? { locationId: target.id, locationName: target.name } : undefined
+}
+
+/** Turns an unambiguous user instruction such as “让他现在去厨房” into a
+ * model-facing execution contract.  The model still decides whether the
+ * character refuses, but an acceptance may no longer be text-only. */
+function immediateLocationInstruction(request?: ImmediateLocationRequest) {
+  if (!request) return ''
+  return `\n【即时地点行动，不能漏】用户正在要求相关联系人立刻前往“${request.locationName}”（${request.locationId}）。角色可以按人设明确拒绝；但只要角色在可见回复中同意、表示正在动身，或实际开始该活动，就必须由该角色调用 change_location，locationId 必须是 ${request.locationId}。绝不能只发“我去/我马上过去”之类文字而不调用行动工具。`
+}
+import { realisticReplyDelayMs } from './replyTiming'
+import { createConversationIllustration, createMediaAsset, detectExplicitImageRequest, startMediaAsset } from './imageAssets'
+import { generateGroupAgentTurn, type GroupImmediateActivityAction } from './chatAgentTools'
+import { createScheduleInternalTask } from './internalTasks'
+import { traceTurnEvent } from './deepseek'
+import type { AppSettings, Contact, Group, GroupAiBubble, Message, Sticker } from '../types'
+
+function ensureGroupImagesHaveText(bubbles: GroupAiBubble[]): GroupAiBubble[] {
+  const textSpeakers = new Set(bubbles.filter((bubble) => bubble.type === 'text').map((bubble) => bubble.speakerIndex))
+  const missingSpeakers = Array.from(new Set(bubbles
+    .filter((bubble) => bubble.type === 'image' && !textSpeakers.has(bubble.speakerIndex))
+    .map((bubble) => bubble.speakerIndex)))
+  if (!missingSpeakers.length) return bubbles
+  return [
+    ...missingSpeakers.map((speakerIndex): GroupAiBubble => ({ speakerIndex, type: 'text', content: '给你们看张图。', thought: '想把这张图发出来', mood: '分享' })),
+    ...bubbles,
+  ]
+}
+
+/** Load recent structured memories for each speaker in parallel. */
+async function loadSpeakerMemories(speakers: Contact[]): Promise<Map<string, string>> {
+  const map = new Map<string, string>()
+  const results = await Promise.all(speakers.map(async (s) => {
+    const text = await nonGroupScopedMemoriesText(s.id)
+    return { id: s.id, text }
+  }))
+  for (const { id, text } of results) {
+    if (text) map.set(id, text)
+  }
+  return map
+}
+
+/**
+ * Same background-engine shape as chatEngine.ts (module-level bookkeeping,
+ * reuses the same useChatEngineStore keyed by conversationId so ChatPage's
+ * aiTyping/error subscription works unchanged for group conversations too)
+ * — kept in its own file rather than folded into chatEngine.ts because the
+ * group turn genuinely has a different shape (multiple personas per turn,
+ * no relationship-dimension updates, a smaller text/sticker-only protocol)
+ * and entangling the two would make chatEngine.ts's single-contact
+ * assumptions harder to reason about. Memory (facts/style/plans) *is*
+ * updated per speaker, via maybeUpdateGroupMemory — see memory.ts.
+ */
+const turns = createTurnController()
+
+function scheduleGroupAiTurn(
+  conversationId: string,
+  group: Group,
+  members: Contact[],
+  settings: AppSettings,
+  stickers: Sticker[],
+  streamId: string,
+  regenerationInstruction = '',
+): void {
+  const delay = realisticReplyDelayMs(isModuleEnabled('realisticReplies'))
+  if (delay === 0) {
+    void runGroupAiTurn(conversationId, group, members, settings, stickers, streamId, regenerationInstruction)
+    return
+  }
+  const timer = setTimeout(() => {
+    if (!turns.isCurrent(conversationId, streamId)) return
+    void runGroupAiTurn(conversationId, group, members, settings, stickers, streamId, regenerationInstruction)
+  }, delay)
+  turns.addTimer(conversationId, timer)
+}
+
+function parseGroupTurnDebugPayload(
+  mainPrompt: string,
+  rawText: string,
+  draftFeedback: string | undefined,
+  jsonRaw: string,
+  finalRaw: string,
+  bubbles: GroupAiBubble[],
+  knowledgeQueries: string[],
+  turnSummary: string,
+): unknown {
+  const parsed = parseJsonLoose(finalRaw)
+  if (parsed && typeof parsed === 'object') {
+    return { ...(parsed as Record<string, unknown>), mainPrompt, rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, turnSummary, promptTrace: { sections: [{ label: '群聊主提示词', content: mainPrompt }] } }
+  }
+  if (parsed !== null) return parsed
+  return { mainPrompt, rawText, draftFeedback, jsonRaw, finalRaw, parsedBubbles: bubbles, knowledgeQueries, turnSummary, promptTrace: { sections: [{ label: '群聊主提示词', content: mainPrompt }] } }
+}
+
+/** Cancels a group generation and its queued bubbles. */
+export function stopGroupAiTurn(conversationId: string): void {
+  turns.begin(conversationId, uuid())
+  useChatEngineStore.getState().patch(conversationId, { aiTyping: false, typingLabel: undefined, error: '' })
+}
+
+export function resetAllGroupChatTurns(): void {
+  turns.resetAll()
+}
+
+function parseCompressedGroupMemory(raw: string): string | null {
+  const parsed = parseJsonLoose<{ memory?: unknown }>(raw)
+  return typeof parsed?.memory === 'string' && parsed.memory.trim() ? parsed.memory.trim() : null
+}
+
+async function updateGroupMemoryAndVibe(opts: {
+  group: Group
+  aiTurnId: string
+  settings: AppSettings
+  turnSummary: string
+  directOutput?: boolean
+}): Promise<void> {
+  const { group, aiTurnId, settings } = opts
+  const now = Date.now()
+  const timeLabel = new Date(now).toLocaleString()
+  const turnSummary = opts.turnSummary.trim()
+  const nextTurnCount = (group.memoryTurnCount ?? 0) + 1
+  const appendedMemory = turnSummary
+    ? [group.memory?.trim() ?? '', `[${timeLabel}] ${turnSummary}`].filter(Boolean).join('\n')
+    : (group.memory ?? '')
+  const patch: Partial<Group> = {
+    memory: appendedMemory,
+    memoryTurnCount: nextTurnCount,
+  }
+
+  if (!opts.directOutput && nextTurnCount % 5 === 0 && appendedMemory.trim()) {
+    try {
+      const raw = await chatCompletion({
+        apiKey: settings.apiKey,
+        baseUrl: settings.baseUrl,
+        model: settings.utilityModel,
+        jsonMode: true,
+        messages: [
+          {
+            role: 'system',
+            content: `你是群聊记忆压缩器。把群"${group.name}"的群聊记忆按时间线压缩，保留重要事件、固定梗、关系变化、长期氛围，不要保留流水账。输出JSON: {"memory":"..."}`,
+          },
+          {
+            role: 'user',
+            content: appendedMemory.slice(-5000),
+          },
+        ],
+        purpose: 'memory',
+        automatic: true,
+      })
+      const compressed = parseCompressedGroupMemory(raw)
+      if (compressed) patch.memory = compressed
+    } catch {
+      // best-effort; keep appended memory if compression fails
+    }
+  }
+
+  await db.transaction('rw', db.groups, db.aiTurns, async () => {
+    const turn = await db.aiTurns.get(aiTurnId)
+    // Regeneration deletes the rejected turn first. An already-running
+    // memory update must not put that rejected summary back afterwards.
+    if (!turn) return
+    await db.groups.update(group.id, patch)
+    if (turn.parsed && typeof turn.parsed === 'object') {
+      await db.aiTurns.update(aiTurnId, {
+        parsed: {
+          ...(turn.parsed as Record<string, unknown>),
+          groupMemoryUpdate: {
+            before: { memory: group.memory ?? '', memoryTurnCount: group.memoryTurnCount ?? 0 },
+            after: patch,
+          },
+        },
+      })
+    }
+  })
+}
+
+function groupTurnSummary(parsed: unknown): string {
+  if (!parsed || typeof parsed !== 'object') return ''
+  const value = (parsed as Record<string, unknown>).turnSummary
+  return typeof value === 'string' ? value.trim() : ''
+}
+
+export function rollbackGroupMemory(group: Group, parsed: unknown): Partial<Group> | undefined {
+  if (!parsed || typeof parsed !== 'object') return undefined
+  const update = (parsed as Record<string, unknown>).groupMemoryUpdate
+  if (update && typeof update === 'object') {
+    const record = update as Record<string, unknown>
+    const before = record.before
+    const after = record.after
+    if (before && typeof before === 'object' && after && typeof after === 'object') {
+      const previous = before as Record<string, unknown>
+      const applied = after as Record<string, unknown>
+      if (typeof applied.memory === 'string' && applied.memory === (group.memory ?? '')) {
+        return {
+          memory: typeof previous.memory === 'string' ? previous.memory : '',
+          memoryTurnCount: typeof previous.memoryTurnCount === 'number' ? previous.memoryTurnCount : 0,
+        }
+      }
+    }
+  }
+
+  // Legacy turns only stored the resulting patch. Their summary was appended
+  // as one timestamped line, so remove that line without disturbing later
+  // accepted group history.
+  const summary = groupTurnSummary(parsed)
+  if (!summary || !group.memory) return undefined
+  const lines = group.memory.split('\n')
+  const index = lines.findLastIndex((line) => line.trim() === summary || line.trim().endsWith(`] ${summary}`))
+  if (index < 0) return undefined
+  lines.splice(index, 1)
+  return {
+    memory: lines.join('\n').trim(),
+    memoryTurnCount: Math.max(0, (group.memoryTurnCount ?? 0) - 1),
+  }
+}
+
+function messageLabel(message: Message, contactById: Map<string, Contact>, userNickname: string): string {
+  if (message.type === 'locationEvent') return '现场事件'
+  if (message.role === 'user') return userNickname || '我'
+  const speaker = message.speakerContactId ? contactById.get(message.speakerContactId) : undefined
+  return speaker ? displayName(speaker) : '某人'
+}
+
+function messageBody(message: Message): string {
+  if (message.type === 'locationEvent') return `[${message.content}]`
+  if (message.type === 'sticker') return `[表情: ${message.content}]`
+  if (message.type === 'link') return `[链接: ${message.content}]`
+  if (message.type === 'gift') return `[礼物: ${message.content}]`
+  if (message.type === 'scheduleChange') return `[日程: ${message.content}]`
+  return message.content
+}
+
+function formatGroupHistoryMessage(
+  message: Message,
+  contactById: Map<string, Contact>,
+  messageById: Map<string, Message>,
+  userNickname: string,
+): ChatMessage {
+  const speakerLabel = messageLabel(message, contactById, userNickname)
+  const parts: string[] = []
+  if (message.mentions?.length) {
+    const names = message.mentions.map((id) => contactById.get(id)).filter((c): c is Contact => !!c).map(displayName)
+    if (names.length > 0) parts.push(`@${names.join(' @')}`)
+  }
+  if (message.replyToMessageId) {
+    const replied = messageById.get(message.replyToMessageId)
+    if (replied) parts.push(`replying to ${messageLabel(replied, contactById, userNickname)}: "${messageBody(replied)}"`)
+  }
+  parts.push(messageBody(message))
+  return { role: message.role, content: `${speakerLabel}: ${parts.join(' | ')}` }
+}
+
+function targetedContextText(
+  latestUserMessage: Message | undefined,
+  contactById: Map<string, Contact>,
+  messageById: Map<string, Message>,
+  userNickname: string,
+): string {
+  if (!latestUserMessage) return ''
+  const lines: string[] = []
+  if (latestUserMessage.mentions?.length) {
+    const names = latestUserMessage.mentions.map((id) => contactById.get(id)).filter((c): c is Contact => !!c).map(displayName)
+    if (names.length > 0) lines.push(`User explicitly @mentioned: ${names.join(', ')}`)
+  }
+  if (latestUserMessage.replyToMessageId) {
+    const replied = messageById.get(latestUserMessage.replyToMessageId)
+    if (replied) {
+      lines.push(`User is replying to ${messageLabel(replied, contactById, userNickname)}: "${messageBody(replied)}"`)
+    }
+  }
+  return lines.join('\n')
+}
+
+export async function sendGroupMessage(
+  conversationId: string,
+  group: Group,
+  members: Contact[],
+  settings: AppSettings,
+  stickers: Sticker[],
+  text: string,
+  mentionContactIds: string[] = [],
+  replyToMessageId?: string,
+): Promise<boolean> {
+  if (!text.trim()) return false
+  if (group.kind === 'location' && group.locationId) {
+    await syncContactLocationsAt(new Date())
+    const participants = await resolveLocationParticipants(group.locationId)
+    members = participants.activeMembers
+    group = { ...group, memberContactIds: members.map((member) => member.id) }
+    await db.groups.update(group.id, { memberContactIds: group.memberContactIds })
+  }
+  if (!settings.apiKey && members.length > 0) {
+    useChatEngineStore.getState().patch(conversationId, { error: '还没有配置 API Key，请前往“我 → LLM 设置”配置模型' })
+    return false
+  }
+
+  const streamId = uuid()
+  turns.begin(conversationId, streamId)
+  useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: '群成员' })
+
+  const messageCreatedAt = await nextMessageTimestamp(conversationId)
+  const msg: Message = {
+    id: uuid(),
+    conversationId,
+    role: 'user',
+    type: 'text',
+    content: text.trim(),
+    mentions: mentionContactIds.length > 0 ? Array.from(new Set(mentionContactIds)) : undefined,
+    replyToMessageId,
+    createdAt: messageCreatedAt,
+  }
+  await db.transaction('rw', db.messages, db.conversations, async () => {
+    await db.messages.add(msg)
+    await db.conversations.update(conversationId, { updatedAt: messageCreatedAt })
+  })
+  if (group.kind === 'location' && members.length === 0) {
+    useChatEngineStore.getState().patch(conversationId, { aiTyping: false, typingLabel: undefined, error: '' })
+    return true
+  }
+  if (msg.mentions?.length || msg.replyToMessageId) {
+    const mentionedNames = msg.mentions
+      ?.map((id) => members.find((member) => member.id === id))
+      .filter((member): member is Contact => !!member)
+      .map(displayName)
+      .join('、')
+    await recordSocialEvent({
+      type: 'group_targeted_message',
+      actorId: 'user',
+      relatedContactIds: Array.from(new Set([...(msg.mentions ?? []), ...group.memberContactIds])),
+      conversationId,
+      groupId: group.id,
+      messageId: msg.id,
+      summary: mentionedNames
+        ? `群聊"${group.name}"里，用户@了${mentionedNames}: ${text.trim()}`
+        : `群聊"${group.name}"里，用户回复了一条消息: ${text.trim()}`,
+      importance: 2,
+    }).catch((error: unknown) => {
+      console.error('Failed to record group mention event', error)
+    })
+  }
+
+  scheduleGroupAiTurn(conversationId, group, members, settings, stickers, streamId)
+  return true
+}
+
+/** Trigger a group reply after a non-text user action has already been stored. */
+export async function triggerGroupAiTurn(
+  conversationId: string,
+  group: Group,
+  members: Contact[],
+  settings: AppSettings,
+  stickers: Sticker[],
+): Promise<void> {
+  if (!settings.apiKey) {
+    useChatEngineStore.getState().patch(conversationId, { error: '还没有配置 API Key，请前往“我 → LLM 设置”配置模型' })
+    return
+  }
+  const streamId = uuid()
+  turns.begin(conversationId, streamId)
+  useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: '群成员' })
+  scheduleGroupAiTurn(conversationId, group, members, settings, stickers, streamId)
+}
+
+export async function regenerateGroupAiTurn(
+  conversationId: string,
+  group: Group,
+  members: Contact[],
+  settings: AppSettings,
+  stickers: Sticker[],
+  aiTurnId: string,
+  regenerationInstruction = '',
+): Promise<void> {
+  if (!settings.apiKey) {
+    useChatEngineStore.getState().patch(conversationId, { error: '还没有配置 API Key，请前往“我 → LLM 设置”配置模型' })
+    return
+  }
+
+  const streamId = uuid()
+  turns.begin(conversationId, streamId)
+  useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: '群成员' })
+
+  const rejectedTurn = await db.aiTurns.get(aiTurnId)
+  const turnMessages = await db.messages
+    .where('conversationId')
+    .equals(conversationId)
+    .filter((message) => message.debugAiTurnId === aiTurnId)
+    .toArray()
+  const rejectedMessageIds = new Set(turnMessages.map((message) => message.id))
+  const rejectedSocialEvents = rejectedMessageIds.size
+    ? await db.socialEvents.filter((event) => !!event.messageId && rejectedMessageIds.has(event.messageId)).toArray()
+    : []
+  const currentGroup = await db.groups.get(group.id)
+  const groupRollback = currentGroup ? rollbackGroupMemory(currentGroup, rejectedTurn?.parsed) : undefined
+  if (turnMessages.length > 0 || rejectedSocialEvents.length > 0 || rejectedTurn || groupRollback) {
+    await db.transaction('rw', db.messages, db.mediaAssets, db.socialEvents, db.aiTurns, db.groups, async () => {
+      await db.messages.bulkDelete(turnMessages.map((message) => message.id))
+      const assetIds = turnMessages.map((message) => message.image?.assetId).filter((id): id is string => !!id)
+      if (assetIds.length) await db.mediaAssets.bulkDelete(assetIds)
+      if (rejectedSocialEvents.length) await db.socialEvents.bulkDelete(rejectedSocialEvents.map((event) => event.id))
+      await db.aiTurns.delete(aiTurnId)
+      if (groupRollback) await db.groups.update(group.id, groupRollback)
+    })
+  }
+  await db.conversations.update(conversationId, { updatedAt: Date.now() })
+
+  scheduleGroupAiTurn(conversationId, await db.groups.get(group.id) ?? group, members, settings, stickers, streamId, regenerationInstruction.trim())
+}
+
+async function runGroupAiTurn(
+  conversationId: string,
+  group: Group,
+  members: Contact[],
+  settings: AppSettings,
+  stickers: Sticker[],
+  streamId: string,
+  regenerationInstruction = '',
+): Promise<void> {
+  const engine = useChatEngineStore.getState()
+  let responseTimeout: ReturnType<typeof setTimeout> | undefined
+  // The experimental JSON-direct mode has no group action protocol. A
+  // location scene must stay on the native group-tool pipeline so moves are
+  // executable rather than merely narrated.
+  const directOutput = isModuleEnabled('directOutput') && group.kind !== 'location'
+  const turnStartedAt = performance.now()
+  engine.patch(conversationId, { aiTyping: true, error: '', typingLabel: '群成员' })
+  const timeoutMs = Math.max(0, Math.min(10 * 60 * 1000, Math.round(settings.chatResponseTimeoutMs ?? 60 * 1000)))
+  if (timeoutMs > 0) {
+    responseTimeout = setTimeout(() => {
+      if (!turns.isCurrent(conversationId, streamId)) return
+      turns.begin(conversationId, uuid())
+      engine.patch(conversationId, { aiTyping: false, typingLabel: undefined, error: `回复等待超过 ${Math.round(timeoutMs / 1000)} 秒，已停止生成。` })
+    }, timeoutMs)
+  }
+  console.log(`[group] 开始生成回复 群=${group.name} conversationId=${conversationId}`)
+  try {
+    // The page can still hold the pre-regeneration Group object. Always use
+    // the current durable memory when composing the next model request.
+    group = await db.groups.get(group.id) ?? group
+    let locationParticipants: LocationParticipants | undefined
+    if (group.kind === 'location' && group.locationId) {
+      await syncContactLocationsAt(new Date())
+      locationParticipants = await resolveLocationParticipants(group.locationId)
+      members = locationParticipants.activeMembers
+      group = { ...group, memberContactIds: members.map((member) => member.id) }
+      await db.groups.update(group.id, { memberContactIds: group.memberContactIds })
+    }
+    if (members.length === 0) {
+      engine.patch(conversationId, { error: group.kind === 'location' ? '' : '这个群里已经没有成员了', aiTyping: false, typingLabel: undefined })
+      return
+    }
+
+    const contactById = new Map(members.map((c) => [c.id, c]))
+
+    const history = (await db.messages.where('conversationId').equals(conversationId).sortBy('createdAt'))
+      .filter((message) => message.image?.presentation !== 'illustration')
+    const messageById = new Map(history.map((m) => [m.id, m]))
+    const latestUserMessage = [...history].reverse().find((m) => m.role === 'user')
+    const preferredSpeakerIds = new Set(latestUserMessage?.mentions ?? [])
+    const replied = latestUserMessage?.replyToMessageId ? messageById.get(latestUserMessage.replyToMessageId) : undefined
+    if (replied?.role === 'assistant' && replied.speakerContactId) preferredSpeakerIds.add(replied.speakerContactId)
+    const speakers = await pickSociallyConnectedSpeakers(members, Array.from(preferredSpeakerIds), group.speakerLimit ?? 3)
+    console.log(`[group] 本轮发言人: ${speakers.map((s) => s.name).join('、')}`)
+    const targetContext = targetedContextText(latestUserMessage, contactById, messageById, settings.userNickname)
+    const recentEventsText = await recentSocialEventsText(members.map((m) => m.id), 4)
+    const sharedOriginalContext = promptModuleEnabled(settings, 'memory') ? await recentSharedOriginalContext(members.map((m) => m.id), settings.userNickname, {
+      maxMessages: 60,
+      maxChars: 10_000,
+      // This group already contributes its recent raw history below. Excluding
+      // it here avoids paying twice for the same messages.
+      excludeConversationId: conversationId,
+    }) : ''
+    const worldbookText = featureActive(settings, 'worldview') ? await retrieveWorldbookContext([group.name, targetContext, history.slice(-10).map((m) => m.content).join(' '), members.map((m) => `${m.name} ${m.systemPrompt}`).join(' ')].filter(Boolean).join('\n'), { worldviewId: settings.activeWorldId || settings.defaultWorldviewId }) : ''
+
+    const speakerMemoriesMap = promptModuleEnabled(settings, 'memory') ? await loadSpeakerMemories(speakers) : new Map<string, string>()
+    const aiRelationshipText = featureActive(settings, 'relationship') ? await aiRelationshipPrompt(members) : ''
+    const remoteStickerSearchEnabled = isStickerProviderReady(settings)
+    const imageGenerationEnabled = isImageProviderReady(settings)
+    const explicitImageKind = imageGenerationEnabled ? detectExplicitImageRequest(latestUserMessage?.content ?? '') : null
+    const explicitImageInstruction = explicitImageKind
+      ? `\n【明确图片请求，不能漏】用户明确要求被点名或最合适的成员发送${explicitImageKind === 'selfie' ? '自拍' : '照片'}。必须由该成员调用 send_image，kind=${explicitImageKind}，participantIndexes 只包含拍照者，includeUser=false，并按动作和环境选择 aspectRatio；普通自拍优先 3:4 或 9:16，禁止习惯性选择 1:1。query 只描述真实画面，禁止手机、屏幕、聊天框、UI、文字、字幕、拼贴或分屏。自动氛围配图不能代替这个动作。`
+      : ''
+    const location = group.kind === 'location' && group.locationId ? await db.locations.get(group.locationId) : undefined
+    const allLocations = isModuleEnabled('location') ? await db.locations.toArray() : []
+    const leafLocations = allLocations.filter((candidate) => !allLocations.some((child) => child.parentId === candidate.id))
+    const locationToolContext = leafLocations.length ? `\n可更改当前地点或创建日程的合法地点：${leafLocations.map((candidate) => `${candidate.name}(${candidate.id})`).join('、')}` : ''
+    const immediateActionRequest = findImmediateLocationRequest(latestUserMessage?.content ?? '', leafLocations)
+    const immediateActionContext = immediateLocationInstruction(immediateActionRequest)
+    const promptBuilder = group.kind === 'location' ? buildLocationRawChatPrompt : buildGroupRawChatPrompt
+    const participantPositions = locationParticipants
+      ? [
+          ...locationParticipants.here.map((contact) => `- ${displayName(contact)}：here，正在当前地点`),
+          ...locationParticipants.audible.map(({ contact, audibility }) => `- ${displayName(contact)}：${audibility}，位于${contact.currentLocationId ?? '未知地点'}`),
+        ].join('\n')
+      : ''
+    const systemPrompt = promptBuilder({
+      stylePrompt: settings.globalSystemPrompt,
+      groupName: group.name,
+      allMembers: members,
+      speakers,
+      stickerNames: stickers.map((s) => s.name),
+      remoteStickerSearchEnabled,
+      imageGenerationEnabled,
+      imageSearchEnabled: !!settings.pexelsApiKey,
+      groupMemoryText: group.memory,
+      currentTimeText: describeCurrentTime(new Date()),
+      userProfileText: buildUserProfileText(settings),
+      targetedContextText: targetContext,
+      recentEventsText: recentEventsText || undefined,
+      worldviewText: worldbookText || undefined,
+      knowledgeDigestText: undefined,
+      speakerMemoriesMap,
+      aiRelationshipText,
+      locationContextText: location
+        ? `当前地点：${location.name}\n地点描述：${location.description}\n设备现实时间：${describeCurrentTime(new Date())}\n现实季节：${realSeason(new Date())}\n人物位置与听觉状态：\n${participantPositions || '当前没有任何人物能听见'}\n模型只能从本轮可发言成员中选择说话人。muffled人物只能隔墙、隔门或从远处搭话。`
+        : undefined,
+      promptModules: settings.promptModules,
+      enabledModules: settings.enabledModules,
+    })
+    if (!systemPrompt.trim()) throw new Error('对话核心提示词模块已屏蔽')
+
+    const recentHistory = history.slice(-CONTEXT_WINDOW_SIZE)
+    const controller = new AbortController()
+    turns.setAbortController(conversationId, controller)
+
+    // Group history needs an explicit "who said this" label per line — unlike
+    // 1:1 chat where the single assistant persona is implicit from the system
+    // prompt, a group turn's assistant block can contain several different
+    // people, and role:"assistant" alone can't distinguish them across turns.
+    const regenerationPrompt = regenerationInstruction
+      ? `【重要：本次重生成必须遵守的剧情指令】\n用户不认可上一版群聊的发展。下方用户指令是本次重生成的首要内容要求：必须落实到实际回复和事件发展中，不可忽略、淡化、回避或改写成相反走向。`
+      : ''
+    const regenerationUserMessage = regenerationInstruction
+      ? `【本次重生成：最高优先级剧情要求】\n请先在心中确认后再作答：你们接下来生成的每条消息和事件发展，都必须严格符合以下要求：\n${regenerationInstruction}\n\n这是用户对上一版结果的明确修正。即使原本会作出不同选择，也必须以此要求为准；不要解释、复述或提及这条要求，只需自然地把它演出来。`
+      : ''
+    const chatMessages: ChatMessage[] = coalesceConsecutiveRoles([
+      { role: 'system', content: [
+        systemPrompt,
+        sharedOriginalContext,
+        regenerationPrompt,
+        directOutput ? buildDirectGroupOutputInstruction(speakers) : '',
+      ].filter(Boolean).join('\n\n') },
+      ...recentHistory.map((m): ChatMessage => formatGroupHistoryMessage(m, contactById, messageById, settings.userNickname)),
+      ...(regenerationUserMessage ? [{ role: 'user' as const, content: regenerationUserMessage }] : []),
+      { role: 'system', content: '【最终生成提醒】准备自然群聊内容，并按后续要求通过本轮原生函数提交；不要在用户可见正文中输出JSON、分析、标题、Markdown、工具名或协议。' },
+    ])
+    let rawText: string
+    let agentParsed: ReturnType<typeof parseGroupAiResponse> & { immediateActivities?: GroupImmediateActivityAction[] }
+    if (directOutput) {
+      rawText = await chatCompletion({ apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, messages: chatMessages, signal: controller.signal, purpose: 'chat', thinking: 'disabled', temperature: regenerationInstruction ? 0.55 : 0.9, maxTokens: 1400, jsonMode: true, trace: { turnId: streamId, stage: 'original_generation', conversationId } })
+      agentParsed = parseGroupAiResponse(rawText, speakers.length)
+    } else {
+      const generated = await generateGroupAgentTurn({
+        apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, utilityModel: settings.utilityModel,
+        messages: [...chatMessages, { role: 'system', content: `本轮必须通过提供的函数发送群聊消息或执行行动。消息总量由工具执行层硬性校验，不得少于或超过指定范围。成员始终可以自然互相接话，但不要机械轮流。send_image 只发送纯图片，发图的同一位联系人必须同时调用 send_text 自然说话；create_schedule 也不能单独作为回复。表情包可以单独发送。每条消息都必须填写该发言人的真实想法和简短中文文字心情；心情禁止使用 emoji。严格选择正确的 speakerIndex。${locationToolContext}${immediateActionContext}${explicitImageInstruction}` }],
+        signal: controller.signal, purpose: 'chat', trace: { turnId: streamId, stage: 'original_generation', conversationId },
+        stickerNames: stickers.map((sticker) => sticker.name), stickerSearchEnabled: remoteStickerSearchEnabled,
+        imageEnabled: imageGenerationEnabled || !!settings.pexelsApiKey, knowledgeEnabled: featureActive(settings, 'knowledgeBase'),
+        scheduleEnabled: isModuleEnabled('location'), locationIds: leafLocations.map((candidate) => candidate.id),
+        speakerNames: speakers.map((speaker) => displayName(speaker)), memberNames: members.map((member) => displayName(member)), messageBounds: groupMessageBounds(group.energyLevel ?? 'normal', speakers.length),
+      })
+      rawText = generated.raw
+      agentParsed = generated.parsed
+    }
+
+    if (!turns.isCurrent(conversationId, streamId)) return
+    console.log(`[group] Agent群聊回复(${rawText.length}字): ${rawText.slice(0, 160)}...`)
+    let draftFeedback: string | undefined
+    const parsedTurn = { ...agentParsed, valid: true, needsUtility: false }
+    let jsonRaw = rawText
+    if (parsedTurn.bubbles.length === 0 && parsedTurn.knowledgeQueries.length === 0) throw new Error('主模型没有产出有效的群聊行动')
+    console.log('[group] 审核模型已完成群聊原文审核和JSON翻译，未调用第三个翻译模型')
+
+    let finalRaw = jsonRaw
+    let { bubbles, knowledgeQueries, immediateActivities = [], outfitChanges, turnSummary, planCandidates } = parsedTurn
+    bubbles = ensureGroupImagesHaveText(bubbles)
+    const initiallyRequestedKnowledge = [...knowledgeQueries]
+    const runLogicReview = (stage: 'first_quality' | 'second_quality') => reviewTurnLogic({
+      settings,
+      latestUserText: latestUserMessage?.content ?? '',
+      draftText: rawText,
+      personaFacts: [
+        ...speakers.map((speaker) => `${displayName(speaker)}：${speaker.systemPrompt.slice(0, 1000)}`),
+        targetContext ? `本轮定向上下文=${targetContext.slice(0, 600)}` : '',
+        featureActive(settings, 'worldview') && worldbookText ? `命中世界书=${worldbookText.slice(0, 800)}` : '',
+      ].filter(Boolean).join('\n'),
+      recentContext: recentHistory
+        .slice(-4)
+        .map((message) => formatGroupHistoryMessage(message, contactById, messageById, settings.userNickname).content)
+        .join('\n'),
+      signal: controller.signal,
+      trace: { turnId: streamId, stage, conversationId },
+    })
+    void runLogicReview
+    const directReview = directOutput ? parseDirectOutputReview(rawText) : null
+    // Semantic/format review is the mandatory second stage above.  Do not
+    // issue legacy extra reviewer calls after JSON translation.
+    let logicReview: { status: 'pass' | 'reject' | 'unavailable'; reason: string } | undefined = (() => undefined as { status: 'pass' | 'reject' | 'unavailable'; reason: string } | undefined)()
+    if (!turns.isCurrent(conversationId, streamId)) return
+    if (logicReview?.status === 'unavailable') {
+      draftFeedback = `审查降级：${logicReview.reason}`
+      console.warn(`[group] 逻辑审查不可用，放行已解析回复 群=${group.name} 原因=${logicReview.reason}`)
+    }
+    if (directReview?.valid === false) {
+      throw new Error(`群聊同次自审未通过：${directReview.reason || '未知原因'}`)
+    }
+    knowledgeQueries = Array.from(new Set([...initiallyRequestedKnowledge, ...knowledgeQueries])).slice(0, 2)
+    if (!directOutput && featureActive(settings, 'knowledgeBase') && knowledgeQueries.length > 0) {
+      const knowledge = await resolveKnowledgeQueries(knowledgeQueries, settings)
+      if (knowledge.text) {
+        const regenerated = await generateGroupAgentTurn({
+          apiKey: settings.apiKey, baseUrl: settings.baseUrl, model: settings.model, utilityModel: settings.utilityModel,
+          messages: [...chatMessages, { role: 'user', content: `刚才出现了你们不了解的词。搜索结果如下：\n${knowledge.text}\n请基于结果自然接话，不要写成报告。` }, { role: 'system', content: `必须通过提供的函数发送消息。send_image 只发送纯图片，发图的同一位联系人必须同时调用 send_text；create_schedule 也必须由同一位联系人同时调用 send_text。每条消息填写真实想法和中文文字心情，禁止使用 emoji。${locationToolContext}${immediateActionContext}` }],
+          signal: controller.signal, purpose: 'chat', trace: { turnId: streamId, stage: 'second_chat', conversationId },
+          stickerNames: stickers.map((sticker) => sticker.name), stickerSearchEnabled: remoteStickerSearchEnabled,
+          imageEnabled: imageGenerationEnabled || !!settings.pexelsApiKey, knowledgeEnabled: false,
+          scheduleEnabled: isModuleEnabled('location'), locationIds: leafLocations.map((candidate) => candidate.id), speakerNames: speakers.map((speaker) => displayName(speaker)), memberNames: members.map((member) => displayName(member)), messageBounds: groupMessageBounds(group.energyLevel ?? 'normal', speakers.length),
+        })
+        rawText = regenerated.raw
+        const enrichedConverted = regenerated.parsed
+        if (enrichedConverted.bubbles.length === 0) throw new Error('知识补全后的审核模型没有产出有效群聊JSON')
+        jsonRaw = rawText
+        finalRaw = jsonRaw
+        ;({ bubbles, knowledgeQueries, immediateActivities, outfitChanges, turnSummary, planCandidates } = enrichedConverted)
+        bubbles = ensureGroupImagesHaveText(bubbles)
+      }
+    }
+    // Providers occasionally return a perfectly natural acceptance such as
+    // “好，我这就去厨房”, but omit the accompanying tool call.  That is a
+    // protocol failure, not a character decision.  Recover the executable
+    // action from the explicit user instruction only after the same speaker
+    // has clearly accepted; explicit refusals remain untouched.
+    if (!directOutput && isModuleEnabled('location') && immediateActionRequest && immediateActivities.length === 0) {
+      const userRequest = latestUserMessage?.content ?? ''
+      const repliedContactId = replied?.role === 'assistant' ? replied.speakerContactId : undefined
+      const addressedContactId = latestUserMessage?.mentions?.find((id) => speakers.some((speaker) => speaker.id === id))
+        ?? repliedContactId
+        ?? speakers.find((speaker) => userRequest.includes(speaker.name))?.id
+      const refusal = /不去|不回|不能去|不想去|没法去|不方便|晚点|之后|下次|等会/
+      const acceptance = /好[呀吧]?|行[呀吧]?|可以|没问题|当然|这就|马上|现在就|我去|我来|动身|出发|过去|回去|回房|回卧室|走吧/
+      const acceptedBubble = bubbles.find((bubble) => {
+        if (bubble.type !== 'text' || refusal.test(bubble.content) || !acceptance.test(bubble.content)) return false
+        const speaker = speakers[bubble.speakerIndex - 1]
+        return !!speaker && (!addressedContactId || speaker.id === addressedContactId)
+      })
+      if (acceptedBubble) {
+        const activity = /做饭|煮饭|炒菜|下厨/.test(userRequest)
+          ? '做饭'
+          : /拿|取/.test(userRequest) ? '取物'
+            : `前往${immediateActionRequest.locationName}`
+        immediateActivities = [{
+          speakerIndex: acceptedBubble.speakerIndex,
+          locationId: immediateActionRequest.locationId,
+          activity,
+          durationMinutes: activity === '做饭' ? 60 : 20,
+          phoneAccess: 'available',
+        }]
+        void traceTurnEvent({ turnId: streamId, conversationId, stage: 'tool_call', output: `补全遗漏的即时行动：${activity}｜${immediateActionRequest.locationName}` })
+      }
+    }
+    console.log(`[group] 收到回复(${finalRaw.length}字) 解析出${bubbles.length}条气泡 群=${group.name}`)
+    if (bubbles.length === 0) {
+      console.warn(`[group] 本轮没有人回复 群=${group.name} 原始内容: ${rawText.slice(0, 200)}`)
+      engine.patch(conversationId, { error: '群里这次没有人回复 可以再发一条试试', aiTyping: false, typingLabel: undefined })
+      return
+    }
+    if (outfitChanges.length > 0) {
+      for (const change of outfitChanges) {
+        const speaker = speakers[change.speakerIndex - 1]
+        if (!speaker) continue
+        const applied = await applyOutfitChange(speaker.id, change, { conversationId, turnId: streamId })
+        if (applied) void traceTurnEvent({ turnId: streamId, conversationId, stage: 'clothing_change', output: `${displayName(speaker)}：${applied.summary}` })
+      }
+    }
+    // A location-scene group turn uses the same immediate-action contract as
+    // private chat.  Previously the group tool whitelist discarded
+    // change_location, so a contact could say they were heading somewhere
+    // but their runtime position never changed.
+    if (!directOutput && isModuleEnabled('location') && immediateActivities.length > 0) {
+      const actionNow = Date.now()
+      const userRequest = latestUserMessage?.content ?? ''
+      for (const action of immediateActivities) {
+        const speaker = speakers[action.speakerIndex - 1]
+        const location = allLocations.find((candidate) => candidate.id === action.locationId)
+        if (!speaker || !location) continue
+        // “去厨房” is an explicit instruction to enter the map's private
+        // home kitchen, even when the user does not redundantly say “我家”.
+        const playerHomeVisit = /来我家|到我家|去我家|来家里|到家里|去家里|邀请你.*家/.test(userRequest)
+          || (action.locationId === 'home-kitchen' && /(?:去|来|到|进|往|回).{0,6}厨房|厨房.{0,6}(?:做|去|来|待|等)/.test(userRequest))
+        const startsAt = actionNow + (action.delayMinutes ?? 0) * 60_000
+        const result = await createScheduleInternalTask(speaker.id, conversationId, {
+          startsAt,
+          endsAt: startsAt + action.durationMinutes * 60_000,
+          locationId: action.locationId,
+          activity: action.activity,
+          summary: `${action.activity} · ${location.name}`,
+          phoneAccess: action.phoneAccess,
+          sourceConversationId: conversationId,
+          playerHomeVisit,
+        }, actionNow)
+        if (result.success) {
+          void traceTurnEvent({ turnId: streamId, conversationId, stage: 'location_change', output: `${displayName(speaker)}：${action.delayMinutes ? `${action.delayMinutes}分钟后` : '立即'}行动 ${action.activity}｜${location.name}｜${action.durationMinutes}分钟` })
+        } else {
+          console.warn(`[group] 立即行动执行失败 contact=${displayName(speaker)} code=${result.code}`)
+        }
+      }
+    }
+    const aiTurnId = uuid()
+    await db.aiTurns.add({
+      id: aiTurnId,
+      conversationId,
+      raw: finalRaw,
+      parsed: parseGroupTurnDebugPayload(systemPrompt, rawText, draftFeedback, jsonRaw, finalRaw, bubbles, knowledgeQueries, turnSummary),
+      knowledgeQueries,
+      createdAt: Date.now(),
+    })
+    const createdPlans = []
+    for (const candidate of planCandidates) {
+      const plan = await createGroupPlan({
+        group,
+        conversationId,
+        title: candidate.title,
+        summary: candidate.summary,
+        location: candidate.location,
+        participantContactIds: candidate.participantIndexes.map((index) => speakers[index - 1]?.id).filter((id): id is string => !!id),
+      })
+      if (plan) createdPlans.push(plan)
+    }
+    for (const plan of createdPlans) await db.messages.add(planCardMessage(plan))
+    void updateGroupMemoryAndVibe({ group, aiTurnId, settings, turnSummary, directOutput })
+    console.info(`[group-perf] 模型与自检完成=${Math.round(performance.now() - turnStartedAt)}ms 群=${group.name}`)
+    revealGroupBubbles(conversationId, group, members, speakers, bubbles, streamId, settings, stickers, aiTurnId, turnSummary, turnStartedAt, directOutput, latestUserMessage?.content, location?.name)
+  } catch (err) {
+    if (!turns.isCurrent(conversationId, streamId)) return
+    if (err instanceof DOMException && err.name === 'AbortError') return
+    const message = err instanceof Error ? err.message : String(err)
+    console.error(`[group] 生成回复出错 群=${group.name}:`, message)
+    engine.patch(conversationId, { error: message, aiTyping: false, typingLabel: undefined })
+  } finally {
+    if (responseTimeout) clearTimeout(responseTimeout)
+  }
+}
+
+function revealGroupBubbles(
+  conversationId: string,
+  group: Group,
+  members: Contact[],
+  speakers: Contact[],
+  bubbles: GroupAiBubble[],
+  streamId: string,
+  settings: AppSettings,
+  stickers: Sticker[],
+  aiTurnId: string,
+  turnSummary: string,
+  turnStartedAt = performance.now(),
+  directOutput = false,
+  latestUserText = '',
+  locationName = '',
+  onFirstBubble?: () => void,
+): void {
+  revealSequentially({
+    conversationId,
+    streamId,
+    items: bubbles,
+    controller: turns,
+    // Reveal the first completed message immediately. A later message only
+    // starts after the previous one, including image/sticker API work, has
+    // been persisted so mixed media can never overtake its intended slot.
+    delayMs: (bubble, i) => i > 0 ? groupTypingDelayMs(bubble) : 0,
+    reveal: async (bubble, i) => {
+      const speaker = speakers[bubble.speakerIndex - 1]
+      let executionError = ''
+      useChatEngineStore.getState().patch(conversationId, {
+        typingLabel: speaker ? displayName(speaker) : '群成员',
+      })
+      let imagePayload: Message['image']
+      let imageFailed = false
+      let imageAssetId: string | undefined
+      const media = bubble.type === 'image'
+        ? { remoteSticker: undefined, stickerFailed: false }
+        : await resolveBubbleMedia(bubble, settings, stickers)
+      const { remoteSticker, stickerFailed } = media
+      let content =
+        bubble.type === 'text'
+          ? stripSpeakerNamePrefix(
+              bubble.content,
+              members.map((m) => m.name),
+            )
+          : bubble.type === 'sticker' ? (stickerFailed ? '表情没找到…' : bubble.name)
+            : bubble.type === 'scheduleChange' ? bubble.summary
+              : imageFailed ? '图片没发出来…' : '[图片]'
+
+      const messageCreatedAt = await nextMessageTimestamp(conversationId)
+      const messageId = uuid()
+      if (bubble.type === 'scheduleChange' && speaker?.id) {
+        const location = bubble.locationId ? await db.locations.get(bubble.locationId) : undefined
+        if (bubble.locationId && !location) executionError = '这个地点已经不可用了，日程没有创建成功。'
+        const fresh = await db.contacts.get(speaker.id)
+        if (!fresh) executionError = '没有找到对应联系人，日程没有创建成功。'
+        if (!executionError && fresh) await db.contacts.update(speaker.id, { scheduleOverrides: [...(fresh.scheduleOverrides ?? []), {
+          id: uuid(), date: bubble.date, startHour: bubble.startHour, endHour: bubble.endHour,
+          phoneAccess: bubble.phoneAccess, location: location?.name ?? bubble.location, locationId: location?.id,
+          activity: bubble.activity, summary: bubble.summary, priority: 'special', createdAt: Date.now(),
+        }] })
+        if (!executionError) void traceTurnEvent({ turnId: streamId, conversationId, stage: 'schedule_change', output: `${displayName(speaker)} 新建：${bubble.activity}｜${bubble.date} ${String(bubble.startHour).padStart(2, '0')}:00-${String(bubble.endHour).padStart(2, '0')}:00｜${location?.name ?? bubble.location}` })
+      }
+      if (bubble.type === 'image') {
+        if (!isImageProviderReady(settings)) imageFailed = true
+        else {
+          try {
+            const kind = bubble.kind ?? 'portrait'
+            let participantIds = (bubble.participantIndexes ?? [])
+              .map((index) => members[index - 1]?.id)
+              .filter((id): id is string => !!id)
+            if (participantIds.length === 0 && kind !== 'scene' && kind !== 'object') participantIds = speaker ? [speaker.id] : []
+            participantIds = selectGroupImageParticipantIds(participantIds, speaker?.id)
+            const asset = await createMediaAsset({ origin: 'chat', originId: messageId, conversationId, turnId: streamId, ownerContactIds: participantIds, includeUser: bubble.includeUser, scene: bubble.query, kind, aspectRatio: kind === 'selfie' && (!bubble.aspectRatio || bubble.aspectRatio === '1:1') ? '3:4' : bubble.aspectRatio ?? (kind === 'portrait' ? '3:4' : kind === 'group' || kind === 'scene' ? '4:3' : '1:1'), settings })
+            imageAssetId = asset.id
+            imagePayload = { assetId: asset.id, query: bubble.query, caption: bubble.caption, provider: asset.provider, presentation: 'sent' }
+          } catch (error) { console.warn('[media] 创建群聊图片任务失败', error); imageFailed = true }
+        }
+      }
+      if (bubble.type === 'image' && imageFailed) content = '图片没发出来…'
+      if (executionError) content = executionError
+      const msg: Message = {
+        id: messageId,
+        conversationId,
+        role: 'assistant',
+        type: executionError || (bubble.type === 'image' && imageFailed) || (bubble.type === 'sticker' && stickerFailed) ? 'text' : bubble.type,
+        content,
+        scheduleChange: !executionError && bubble.type === 'scheduleChange' ? { date: bubble.date, startHour: bubble.startHour, endHour: bubble.endHour, phoneAccess: bubble.phoneAccess, location: bubble.location, locationId: bubble.locationId, activity: bubble.activity, summary: bubble.summary } : undefined,
+        speakerContactId: speaker?.id,
+        debugAiTurnId: aiTurnId,
+        debugParsedBubble: bubble,
+        thought: bubble.thought,
+        sticker: remoteSticker ? { url: remoteSticker.url, provider: remoteSticker.provider } : undefined,
+        image: imagePayload,
+        createdAt: messageCreatedAt,
+      }
+      await db.messages.add(msg)
+      if (imageAssetId) startMediaAsset(imageAssetId)
+      if (i === 0) onFirstBubble?.()
+      if (remoteSticker) void trackRemoteStickerSend(remoteSticker)
+      if (i === 0) {
+        console.info(`[group-perf] 首条气泡显示=${Math.round(performance.now() - turnStartedAt)}ms 群=${group.name}`)
+      }
+      if (speaker?.id && bubble.mood) {
+        await db.contacts.update(speaker.id, {
+          mood: { text: bubble.mood, expiresAt: Date.now() + settings.moodExpiryMs },
+        })
+      }
+      await db.conversations.update(conversationId, { updatedAt: messageCreatedAt })
+
+      if (useChatUiStore.getState().activeConversationId !== conversationId) {
+        useChatUiStore.getState().showNotification({
+          id: uuid(),
+          conversationId,
+          contactName: group.name,
+          contactAvatar: group.avatar,
+          contactAvatarColor: group.avatarColor,
+          preview: previewForMessage(msg, speaker ? displayName(speaker) : undefined),
+        })
+      }
+
+      if (i === bubbles.length - 1) {
+        const requestedImageKind = isImageProviderReady(settings) ? detectExplicitImageRequest(latestUserText) : null
+        const turnAlreadyHasImage = bubbles.some((item) => item.type === 'image')
+        const shouldCreateRequestedImage = !!requestedImageKind && !turnAlreadyHasImage
+        const shouldCreateIllustration = !requestedImageKind && !turnAlreadyHasImage && isModuleEnabled('conversationIllustration') && isImageProviderReady(settings)
+        if (shouldCreateRequestedImage || shouldCreateIllustration) {
+          const illustrationCreatedAt = await nextMessageTimestamp(conversationId)
+          const replyText = [turnSummary, ...bubbles.map((item) => item.type === 'text' ? item.content : item.type === 'scheduleChange' ? item.summary : '')].filter(Boolean).join('\n')
+          const requestedSpeaker = speakers[0]
+          try {
+            await createConversationIllustration({
+              conversationId,
+              turnId: aiTurnId,
+              ownerContactIds: shouldCreateRequestedImage && requestedSpeaker ? [requestedSpeaker.id] : speakers.map((contact) => contact.id),
+              participantNames: shouldCreateRequestedImage && requestedSpeaker ? [displayName(requestedSpeaker)] : speakers.map(displayName),
+              latestUserText,
+              replyText,
+              context: [`Group chat: ${group.name}`, locationName ? `Current location: ${locationName}` : ''].filter(Boolean).join('\n'),
+              settings,
+              createdAt: illustrationCreatedAt,
+              presentation: shouldCreateRequestedImage ? 'sent' : 'illustration',
+              requestedKind: requestedImageKind ?? undefined,
+              speakerContactId: shouldCreateRequestedImage ? requestedSpeaker?.id : undefined,
+            })
+          } catch (error) {
+            console.warn('[media] 创建本轮群聊配图失败', error)
+          }
+        }
+        useChatEngineStore.getState().patch(conversationId, { aiTyping: false, typingLabel: undefined })
+        if (!directOutput) void maybeUpdateGroupMemory(group.id, conversationId, members, settings)
+
+        // A group conversation is shared context: unlike a private chat, it
+        // can naturally colour a member's later 1:1 chat and a follow-up
+        // moment. Persist only the model's one-line group summary, never the
+        // raw transcript, so this creates continuity without leaking details
+        // from messages that were not meant to leave the group.
+        if (turnSummary.trim()) {
+          await recordSocialEvent({
+            type: 'group_turn',
+            actorId: speaker?.id ?? 'user',
+            relatedContactIds: group.memberContactIds,
+            conversationId,
+            groupId: group.id,
+            messageId: msg.id,
+            summary: `群聊“${group.name}”刚聊到：${turnSummary.trim()}`,
+            importance: 2,
+          })
+        }
+          }
+    },
+    onError: (error) => console.error('[group] 气泡写入失败', error),
+    onComplete: () => useChatEngineStore.getState().patch(conversationId, { aiTyping: false, typingLabel: undefined }),
+  })
+}

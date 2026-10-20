@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Talk · WeTalk 视觉原型</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body data-mode="light" data-phone-view="messages">
+    <header class="study-head">
+      <div>
+        <p class="kicker">Talk visual study · WeTalk direction</p>
+        <h1>WeTalk，不只是“微信绿”</h1>
+        <p class="lead">低装饰、高密度、清楚的列表层级，再让绿色只负责状态和关键动作。</p>
+      </div>
+      <div class="study-controls">
+        <div class="segmented" aria-label="颜色模式">
+          <button class="active" data-mode-button="light">浅色</button>
+          <button data-mode-button="dark">深色</button>
+        </div>
+        <div class="segmented phone-switch" aria-label="手机页面">
+          <button class="active" data-view-button="messages">消息页</button>
+          <button data-view-button="chat">聊天页</button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="design-notes" aria-label="设计摘要">
+        <article><span>01</span><div><b>绿色克制</b><p>#07C160 只用于选中、状态和确认，不铺满界面。</p></div></article>
+        <article><span>02</span><div><b>列表优先</b><p>头像 46px、行高约 68px、分割线从正文起始位置延伸。</p></div></article>
+        <article><span>03</span><div><b>小圆角</b><p>头像、搜索框、气泡保持 4–8px，避免卡片化过度。</p></div></article>
+        <article><span>04</span><div><b>灰度分层</b><p>页面、列表、聊天区靠相邻灰阶区分，阴影几乎不用。</p></div></article>
+      </section>
+
+      <div class="preview-labels"><span>PC · WeTalk 桌面布局</span><span>手机 · WeTalk 社交密度</span></div>
+      <section class="preview-grid">
+        <div class="desktop-window">
+          <header class="window-bar"><div><i class="wechat-mark">••</i><b>Talk</b></div><div class="window-actions"><span>—</span><span>□</span><span>×</span></div></header>
+          <div class="desktop-body">
+            <nav class="desktop-rail">
+              <div class="avatar avatar-me">林</div>
+              <button class="rail-item active" aria-label="消息"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 3V5Z"/></svg><em>2</em></button>
+              <button class="rail-item" aria-label="联系人"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.3"/><path d="M5 19c1.4-3.4 3.7-5 7-5s5.6 1.6 7 5"/></svg></button>
+              <button class="rail-item" aria-label="朋友圈"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"/><path d="m15 9-2 5-4 1 2-5 4-1Z"/></svg></button>
+              <div class="rail-spacer"></div>
+              <button class="rail-item" aria-label="更多"><svg viewBox="0 0 24 24"><circle cx="6" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="18" cy="12" r="1"/></svg></button>
+            </nav>
+
+            <aside class="desktop-list">
+              <div class="desktop-search"><label><svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 4 4"/></svg><input placeholder="搜索" /></label><button>＋</button></div>
+              <Conversation active avatar="知" tone="sand" name="沈知夏" time="14:32" preview="那我们就周末去，别再放鸽子了" badge="2"></Conversation>
+              <Conversation avatar="陆" tone="blue" name="陆川" time="13:08" preview="文件我放在共享里了"></Conversation>
+              <Conversation avatar="程" tone="green" name="程月" time="昨天" preview="[图片] 今天的落日很好看"></Conversation>
+              <Conversation avatar="AI" tone="gray" name="生活助手" time="周二" preview="已为你整理 3 条待办"></Conversation>
+            </aside>
+
+            <section class="desktop-chat">
+              <header class="chat-head"><b>沈知夏</b><div><button aria-label="语音通话">⌕</button><button aria-label="更多">···</button></div></header>
+              <div class="chat-scroll">
+                <time class="chat-time">14:28</time>
+                <div class="message"><div class="avatar avatar-sand">知</div><div class="bubble bubble-in">你上次说的那家展览，还想去吗？</div></div>
+                <div class="message mine"><div class="bubble bubble-out">想啊，周六下午怎么样？</div><div class="avatar avatar-me">林</div></div>
+                <div class="message"><div class="avatar avatar-sand">知</div><div class="bubble bubble-in">可以。那我买两点那场，你别迟到。</div></div>
+              </div>
+              <div class="desktop-composer"><div class="tool-row"><button>☺</button><button>▱</button><button>⌁</button><button>▢</button></div><textarea aria-label="输入消息"></textarea><div class="send-row"><span>按 Enter 发送</span><button>发送</button></div></div>
+            </section>
+          </div>
+        </div>
+
+        <div class="phone-wrap">
+          <div class="phone">
+            <div class="statusbar"><b>9:41</b><span>▮▮▮ ᴡɪꜰɪ ▰</span></div>
+            <section class="phone-page phone-messages">
+              <header class="mobile-head"><span></span><b>消息</b><div><button>＋</button></div></header>
+              <div class="mobile-search"><label><svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="m15 15 4 4"/></svg><span>搜索</span></label></div>
+              <div class="mobile-conversations">
+                <button class="mobile-conversation" data-open-chat>
+                  <div class="avatar avatar-sand">知</div><div class="mobile-copy"><div><b>沈知夏</b><time>14:32</time></div><p>那我们就周末去，别再放鸽子了</p></div><em>2</em>
+                </button>
+                <button class="mobile-conversation"><div class="avatar avatar-blue">陆</div><div class="mobile-copy"><div><b>陆川</b><time>13:08</time></div><p>文件我放在共享里了</p></div></button>
+                <button class="mobile-conversation"><div class="avatar avatar-green">程</div><div class="mobile-copy"><div><b>程月</b><time>昨天</time></div><p>[图片] 今天的落日很好看</p></div></button>
+                <button class="mobile-conversation"><div class="avatar avatar-gray">AI</div><div class="mobile-copy"><div><b>生活助手</b><time>周二</time></div><p>已为你整理 3 条待办</p></div></button>
+              </div>
+              <nav class="bottom-nav">
+                <button class="active"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 3V5Z"/></svg><span>消息</span><em>2</em></button>
+                <button><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.3"/><path d="M5 19c1.4-3.4 3.7-5 7-5s5.6 1.6 7 5"/></svg><span>通讯录</span></button>
+                <button><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="7.5"/><path d="m15 9-2 5-4 1 2-5 4-1Z"/></svg><span>发现</span></button>
+                <button><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.3"/><path d="M5 19c1.4-3.4 3.7-5 7-5s5.6 1.6 7 5"/></svg><span>我</span></button>
+              </nav>
+            </section>
+
+            <section class="phone-page phone-chat">
+              <header class="mobile-head chat-mobile-head"><button data-back-messages aria-label="返回">‹</button><b>沈知夏</b><div><button>···</button></div></header>
+              <div class="mobile-chat-scroll">
+                <time class="chat-time">14:28</time>
+                <div class="message"><div class="avatar avatar-sand">知</div><div class="bubble bubble-in">你上次说的那家展览，还想去吗？</div></div>
+                <div class="message mine"><div class="bubble bubble-out">想啊，周六下午怎么样？</div><div class="avatar avatar-me">林</div></div>
+                <div class="message"><div class="avatar avatar-sand">知</div><div class="bubble bubble-in">可以。那我买两点那场，你别迟到。</div></div>
+              </div>
+              <div class="mobile-composer"><button aria-label="语音">◉</button><input aria-label="输入消息" /><button aria-label="表情">☺</button><button aria-label="更多">⊕</button></div>
+            </section>
+          </div>
+          <p class="phone-hint">点击第一条会话，可查看聊天页与 WeTalk 消息气泡。</p>
+        </div>
+      </section>
+    </main>
+
+    <footer><span>WeTalk 正式主题的视觉原型。</span><span>WeChat-inspired · no official assets used</span></footer>
+
+    <template id="conversation-template">
+      <button class="conversation"><div class="avatar"></div><div class="conversation-copy"><div><b></b><time></time></div><p></p></div><em></em></button>
+    </template>
+    <script src="./demo.js"></script>
+  </body>
+</html>

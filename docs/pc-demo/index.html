@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Talk PC Demo</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --green: #07c160;
+      --green-soft: #e9f8ef;
+      --ink: #17191c;
+      --muted: #8b9098;
+      --line: #e8e9eb;
+      --panel: #f7f8fa;
+      --sidebar: #202225;
+      --hover: #f0f1f3;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 15% 10%, rgba(7,193,96,.09), transparent 26%),
+        linear-gradient(145deg, #eef1f4 0%, #dfe4e8 100%);
+      color: var(--ink);
+      font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+      user-select: none;
+    }
+    button, input { font: inherit; }
+    button { border: 0; cursor: pointer; }
+    .desktop {
+      width: min(1380px, calc(100vw - 48px));
+      height: min(860px, calc(100vh - 48px));
+      margin: 24px auto;
+      overflow: hidden;
+      border: 1px solid rgba(0,0,0,.12);
+      border-radius: 13px;
+      background: white;
+      box-shadow: 0 28px 80px rgba(32, 41, 50, .22);
+      display: grid;
+      grid-template-columns: 72px 330px minmax(520px, 1fr);
+      grid-template-rows: 38px 1fr;
+    }
+    .desktop.detail-mode { grid-template-columns: 72px 0 minmax(720px, 1fr); }
+    .desktop.detail-mode .list-panel { visibility: hidden; }
+    .titlebar {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      border-bottom: 1px solid var(--line);
+      background: #fbfbfc;
+      color: #686d75;
+      font-size: 12px;
+    }
+    .app-mark { width: 72px; display: grid; place-items: center; }
+    .app-mark img { width: 22px; height: 22px; border-radius: 6px; }
+    .window-title { flex: 1; padding-left: 12px; }
+    .window-controls { display: flex; height: 100%; }
+    .window-controls button { width: 46px; background: transparent; color: #555b63; }
+    .window-controls button:hover { background: #e9eaec; }
+    .window-controls .close:hover { color: white; background: #e81123; }
+    .rail {
+      background: var(--sidebar);
+      color: #9da2a9;
+      display: flex;
+      min-height: 0;
+      flex-direction: column;
+      align-items: center;
+      padding: 18px 0 14px;
+      gap: 12px;
+    }
+    .avatar-me {
+      width: 42px; height: 42px; border-radius: 10px;
+      display: grid; place-items: center;
+      color: #fff; font-weight: 700; font-size: 17px;
+      background: linear-gradient(135deg, #56d78e, #07a950);
+      box-shadow: inset 0 0 0 1px rgba(255,255,255,.15);
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+    .rail-btn {
+      width: 48px; height: 48px; border-radius: 10px;
+      color: inherit; background: transparent;
+      display: grid; place-items: center; position: relative;
+    }
+    .rail-btn:hover { color: #d9dcdf; background: rgba(255,255,255,.06); }
+    .rail-btn.active { color: #55d98f; background: rgba(85,217,143,.1); }
+    .rail-btn svg { width: 24px; height: 24px; }
+    .rail-spacer { flex: 1; }
+    .badge {
+      position: absolute; top: 5px; right: 5px;
+      min-width: 17px; height: 17px; padding: 0 4px;
+      display: grid; place-items: center;
+      color: white; background: #f04444; border-radius: 9px;
+      border: 2px solid var(--sidebar); font: 10px/1 "Segoe UI";
+    }
+    .list-panel {
+      min-width: 0; min-height: 0;
+      background: var(--panel); border-right: 1px solid var(--line);
+      display: flex; flex-direction: column;
+    }
+    .list-head { height: 68px; padding: 15px 15px 11px; display: flex; gap: 9px; }
+    .search {
+      min-width: 0; flex: 1; height: 36px; border-radius: 8px;
+      background: #e9eaec; display: flex; align-items: center; gap: 8px;
+      padding: 0 11px; color: #8f949b;
+    }
+    .search input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: #444; }
+    .square-btn { width: 36px; height: 36px; border-radius: 8px; background: #e9eaec; color: #555b63; }
+    .section-title { padding: 4px 18px 8px; font-size: 13px; color: var(--muted); }
+    .list-content { min-height: 0; overflow: auto; padding-bottom: 12px; }
+    .conversation {
+      width: 100%; height: 72px; padding: 10px 13px 10px 8px;
+      display: flex; gap: 11px; text-align: left; background: transparent;
+      border-radius: 0;
+    }
+    .conversation:hover { background: var(--hover); }
+    .conversation.active { background: #dedfe1; }
+    .avatar {
+      width: 48px; height: 48px; border-radius: 11px; flex: 0 0 48px;
+      display: grid; place-items: center; font-size: 21px;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,.04);
+    }
+    .conversation-main { min-width: 0; flex: 1; padding-top: 2px; }
+    .conversation-top { display: flex; gap: 8px; align-items: center; }
+    .conversation-name { display: block; min-width: 0; flex: 1; color: #25282d; font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .conversation-time { color: #a3a7ad; font-size: 11px; }
+    .conversation-preview { display: block; margin-top: 5px; color: #8b9097; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .content { min-width: 0; min-height: 0; background: #f4f5f6; position: relative; }
+    .page { display: none; width: 100%; height: 100%; }
+    .page.active { display: flex; }
+    .chat-page { flex-direction: column; }
+    .chat-head {
+      height: 68px; flex: 0 0 68px; padding: 0 22px;
+      display: flex; align-items: center; border-bottom: 1px solid var(--line); background: #f7f8f9;
+    }
+    .chat-head-main { min-width: 0; flex: 1; }
+    .chat-name { font-size: 16px; font-weight: 650; }
+    .presence { margin-top: 4px; color: #8b9097; font-size: 11px; }
+    .presence::before { content: ""; display: inline-block; width: 6px; height: 6px; background: var(--green); border-radius: 50%; margin-right: 6px; }
+    .icon-btn { width: 38px; height: 38px; border-radius: 8px; background: transparent; color: #62676e; font-size: 20px; }
+    .icon-btn:hover { background: #e8eaec; }
+    .messages { min-height: 0; flex: 1; overflow: auto; padding: 26px 22px 22px; }
+    .time-separator { text-align: center; color: #a2a6ac; font-size: 11px; margin: 6px 0 20px; }
+    .message { display: flex; align-items: flex-start; gap: 10px; margin: 17px 0; }
+    .message.mine { flex-direction: row-reverse; }
+    .message .avatar { width: 38px; height: 38px; flex-basis: 38px; border-radius: 9px; font-size: 16px; }
+    .bubble { max-width: min(560px, 70%); padding: 10px 13px; border-radius: 5px 13px 13px 13px; background: white; box-shadow: 0 1px 2px rgba(0,0,0,.05); font-size: 14px; line-height: 1.65; }
+    .mine .bubble { background: #95ec69; border-radius: 13px 5px 13px 13px; }
+    .typing { display: inline-flex; gap: 4px; padding: 7px 4px 2px; }
+    .typing i { width: 5px; height: 5px; border-radius: 50%; background: #9da2a9; animation: bounce 1.2s infinite; }
+    .typing i:nth-child(2) { animation-delay: .15s; }
+    .typing i:nth-child(3) { animation-delay: .3s; }
+    @keyframes bounce { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-4px); } }
+    .composer { height: 166px; flex: 0 0 166px; background: #fff; border-top: 1px solid var(--line); padding: 11px 20px 14px; }
+    .composer-tools { display: flex; align-items: center; gap: 4px; color: #555b63; }
+    .tool-btn { width: 34px; height: 32px; border-radius: 7px; background: transparent; font-size: 19px; }
+    .tool-btn:hover { background: #f1f2f3; }
+    .composer textarea { width: 100%; height: 72px; padding: 8px 4px; resize: none; border: 0; outline: 0; font: 14px/1.5 inherit; }
+    .composer-foot { display: flex; align-items: center; justify-content: flex-end; gap: 10px; }
+    .hint { color: #a0a4aa; font-size: 11px; }
+    .send { padding: 7px 23px; border-radius: 7px; color: #148348; background: #e8f7ee; font-size: 13px; }
+    .send:hover { background: #d9f2e3; }
+    .generic-page { flex-direction: column; background: #f8f9fa; }
+    .generic-head { height: 68px; flex: 0 0 68px; padding: 0 25px; display: flex; align-items: center; border-bottom: 1px solid var(--line); background: #fff; }
+    .generic-title { font-size: 18px; font-weight: 650; flex: 1; }
+    .generic-scroll { min-height: 0; overflow: auto; padding: 26px; }
+    .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .card { background: white; border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
+    .card h3 { margin: 0 0 7px; font-size: 14px; }
+    .card p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.65; }
+    .contact-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .contact-card { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 13px 15px 13px 8px; background: white; border: 1px solid var(--line); border-radius: 11px; }
+    .contact-card strong { display: block; font-size: 14px; }
+    .contact-card small { display: block; color: var(--muted); margin-top: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .moments-column { max-width: 760px; }
+    .moments-cover {
+      height: 240px; margin-bottom: 14px; position: relative; overflow: hidden;
+      border-radius: 12px; cursor: pointer;
+      background:
+        linear-gradient(180deg, rgba(16,31,38,.04), rgba(16,31,38,.48)),
+        radial-gradient(circle at 24% 30%, rgba(255,255,255,.85) 0 3%, transparent 4%),
+        linear-gradient(145deg, #b7d7ce 0%, #7ca9a5 35%, #527b82 62%, #324d5b 100%);
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,.06);
+    }
+    .moments-cover::before,
+    .moments-cover::after { content: ""; position: absolute; left: -6%; right: -6%; bottom: -32%; height: 74%; border-radius: 50% 50% 0 0; transform: rotate(-3deg); background: rgba(27,73,68,.45); }
+    .moments-cover::after { left: 38%; right: -18%; bottom: -39%; background: rgba(13,50,52,.58); transform: rotate(5deg); }
+    .moments-cover.has-image { background-position: center; background-size: cover; }
+    .moments-cover.has-image::before,
+    .moments-cover.has-image::after { display: none; }
+    .cover-hint { position: absolute; left: 16px; top: 14px; z-index: 1; padding: 6px 10px; border-radius: 7px; color: rgba(255,255,255,.9); background: rgba(0,0,0,.22); font-size: 11px; opacity: 0; transition: opacity .16s; }
+    .moments-cover:hover .cover-hint { opacity: 1; }
+    .cover-person { position: absolute; z-index: 2; right: 18px; bottom: 16px; display: flex; align-items: center; gap: 10px; color: white; font-weight: 650; text-shadow: 0 1px 4px rgba(0,0,0,.5); }
+    .cover-person .avatar { width: 54px; height: 54px; flex-basis: 54px; border: 2px solid white; font-size: 19px; text-shadow: none; }
+    .moment { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 16px 16px 14px 8px; margin-bottom: 14px; }
+    .moment-top { display: flex; align-items: center; gap: 11px; }
+    .moment-top strong { font-size: 14px; }
+    .moment p { padding-left: 49px; margin: 5px 0 12px; line-height: 1.7; font-size: 14px; }
+    .moment-meta { padding-left: 49px; display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 11px; }
+    .moment-actions { display: flex; gap: 8px; }
+    .moment-action { min-width: 76px; height: 38px; padding: 0 14px; border-radius: 9px; color: #576b95; background: #f1f3f5; font-size: 13px; font-weight: 600; }
+    .moment-action:hover { background: #e7eaed; }
+    .moment-action.liked { color: #e14a4a; background: #fff0f0; }
+    .replies { margin: 12px 0 0 49px; padding: 10px 12px; border-radius: 8px; background: #f4f5f6; font-size: 12px; line-height: 1.75; }
+    .replies strong { color: #576b95; }
+    [data-profile] { cursor: pointer; }
+    [data-profile]:hover { filter: brightness(.96); }
+    .profile-modal { position: absolute; inset: 0; z-index: 30; display: none; align-items: center; justify-content: center; background: rgba(16,20,24,.32); backdrop-filter: blur(2px); }
+    .profile-modal.open { display: flex; }
+    .profile-card { width: 360px; border-radius: 14px; background: white; box-shadow: 0 24px 70px rgba(0,0,0,.25); overflow: hidden; }
+    .profile-card-cover { height: 92px; background: linear-gradient(135deg, #bfead2, #73c99a); }
+    .profile-card-body { position: relative; padding: 0 22px 22px; }
+    .profile-card-body .avatar { width: 68px; height: 68px; position: absolute; top: -34px; left: 22px; border: 3px solid white; font-size: 25px; }
+    .profile-close { position: absolute; right: 14px; top: 12px; width: 30px; height: 30px; border-radius: 8px; color: white; background: rgba(0,0,0,.22); font-size: 18px; }
+    .profile-info { padding-top: 44px; }
+    .profile-info h3 { margin: 0; font-size: 18px; }
+    .profile-info p { margin: 6px 0 18px; color: var(--muted); font-size: 12px; }
+    .profile-actions { display: flex; gap: 10px; }
+    .profile-actions button { flex: 1; height: 38px; border-radius: 8px; color: #148348; background: var(--green-soft); }
+    .profile-edit-page { flex-direction: column; background: #f6f7f8; }
+    .profile-edit-head { height: 68px; flex: 0 0 68px; display: flex; align-items: center; gap: 12px; padding: 0 24px; border-bottom: 1px solid var(--line); background: white; }
+    .back-btn { width: 36px; height: 36px; border-radius: 8px; background: transparent; color: #50565e; font-size: 22px; }
+    .back-btn:hover { background: #f0f1f3; }
+    .profile-edit-head h2 { margin: 0; flex: 1; font-size: 18px; }
+    .profile-edit-scroll { min-height: 0; flex: 1; overflow: auto; padding: 32px; }
+    .edit-card { width: min(720px, 100%); margin: 0 auto; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: white; }
+    .edit-hero { height: 140px; position: relative; background: linear-gradient(135deg, #b9ead0, #69c995); }
+    .edit-avatar-wrap { position: absolute; left: 28px; bottom: -42px; }
+    .edit-avatar { width: 84px; height: 84px; display: grid; place-items: center; border: 4px solid white; border-radius: 18px; background: #dff5e8; color: #163e2b; font-size: 28px; font-weight: 700; cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,.12); overflow: hidden; }
+    .edit-avatar img { width: 100%; height: 100%; object-fit: cover; }
+    .edit-avatar-tip { position: absolute; left: 98px; bottom: 4px; width: 180px; color: rgba(255,255,255,.95); font-size: 12px; text-shadow: 0 1px 3px rgba(0,0,0,.3); }
+    .edit-form { padding: 64px 28px 28px; }
+    .form-row { display: grid; grid-template-columns: 110px 1fr; align-items: start; gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+    .form-row:last-child { border-bottom: 0; }
+    .form-row label { padding-top: 9px; color: #4e535a; font-size: 13px; }
+    .form-row input,
+    .form-row textarea { width: 100%; border: 1px solid #dfe1e4; border-radius: 8px; outline: 0; padding: 9px 11px; color: var(--ink); background: #fafbfb; }
+    .form-row textarea { min-height: 88px; resize: vertical; }
+    .form-row input:focus,
+    .form-row textarea:focus { border-color: #65c892; box-shadow: 0 0 0 3px rgba(7,193,96,.09); }
+    .edit-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 18px 28px; border-top: 1px solid var(--line); background: #fafbfb; }
+    .secondary-btn { height: 38px; padding: 0 24px; border-radius: 8px; color: #596069; background: #eceeef; }
+    .primary-btn { height: 38px; padding: 0 24px; border-radius: 8px; color: white; background: var(--green); }
+    .upload-toast { position: absolute; z-index: 40; left: 50%; bottom: 28px; transform: translateX(-50%) translateY(12px); padding: 9px 16px; border-radius: 8px; color: white; background: rgba(28,31,34,.86); font-size: 12px; opacity: 0; pointer-events: none; transition: .2s; }
+    .upload-toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    .settings { max-width: 760px; background: #fff; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+    .setting { min-height: 64px; display: flex; align-items: center; gap: 16px; padding: 12px 18px; border-bottom: 1px solid var(--line); }
+    .setting:last-child { border-bottom: 0; }
+    .setting-main { flex: 1; }
+    .setting-main strong { display: block; font-size: 14px; }
+    .setting-main small { color: var(--muted); }
+    .toggle { width: 38px; height: 22px; border-radius: 11px; background: var(--green); padding: 2px; }
+    .toggle::after { content: ""; display: block; width: 18px; height: 18px; margin-left: 16px; border-radius: 50%; background: white; box-shadow: 0 1px 3px rgba(0,0,0,.2); }
+    .empty-state { height: 100%; display: grid; place-items: center; color: var(--muted); text-align: center; }
+    .empty-state .big { font-size: 42px; margin-bottom: 10px; }
+    .list-view { display: none; }
+    .list-view.active { display: block; }
+    @media (max-width: 980px) {
+      .desktop { width: 100vw; height: 100vh; margin: 0; border: 0; border-radius: 0; grid-template-columns: 64px 290px minmax(430px, 1fr); }
+      .app-mark { width: 64px; }
+      .contact-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+  </style>
+</head>
+<body>
+  <main class="desktop">
+    <header class="titlebar">
+      <div class="app-mark"><img src="../../public/app-icon.png" alt="Talk" /></div>
+      <div class="window-title">Talk</div>
+      <div class="window-controls" aria-label="窗口控制">
+        <button title="最小化">—</button><button title="最大化">□</button><button class="close" title="关闭">×</button>
+      </div>
+    </header>
+
+    <nav class="rail" aria-label="主导航">
+      <div class="avatar-me" data-profile="林默" data-avatar="林" data-note="这是你 · Talk 本地用户">林</div>
+      <button class="rail-btn active" data-page="messages" title="消息">
+        <span class="badge">3</span>
+        <svg viewBox="0 0 24 24" fill="none"><path d="M4 5h16v12H9l-5 3V5Z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg>
+      </button>
+      <button class="rail-btn" data-page="contacts" title="联系人">
+        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="8" r="3.2" stroke="currentColor" stroke-width="1.8"/><path d="M5 20c1.2-4 3.7-6 7-6s5.8 2 7 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+      <button class="rail-btn" data-page="discover" title="发现">
+        <span class="badge">1</span>
+        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.8"/><path d="m15.5 8.5-2 5-5 2 2-5 5-2Z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="rail-spacer"></div>
+      <button class="rail-btn" data-page="settings" title="设置">
+        <svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.8"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A8 8 0 0 0 15 6l-.3-2.6h-4L10.5 6A8 8 0 0 0 9 7.1l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1A8 8 0 0 0 10.5 18l.2 2.6h4L15 18a8 8 0 0 0 1.5-1.1l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1Z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+      </button>
+    </nav>
+
+    <aside class="list-panel">
+      <div class="list-head">
+        <label class="search"><span>⌕</span><input placeholder="搜索" /></label>
+        <button class="square-btn" title="新建">＋</button>
+      </div>
+      <div class="list-view active" data-list="messages">
+        <div class="section-title">最近会话</div>
+        <div class="list-content">
+          <button class="conversation active" data-chat="苏晚">
+            <span class="avatar" data-profile="苏晚" data-avatar="🌙" data-note="亲密 · 插画师 · 正在创作" style="background:#f3d5cb">🌙</span><span class="conversation-main"><span class="conversation-top"><span class="conversation-name">苏晚</span><span class="conversation-time">10:42</span></span><span class="conversation-preview">那你先忙，我等你忙完再说。</span></span>
+          </button>
+          <button class="conversation" data-chat="旅行搭子">
+            <span class="avatar" data-profile="旅行搭子" data-avatar="🏔️" data-note="群聊 · 3 位成员" style="background:#d8e8f7">🏔️</span><span class="conversation-main"><span class="conversation-top"><span class="conversation-name">旅行搭子（3）</span><span class="conversation-time">09:18</span></span><span class="conversation-preview">周屿：那就定周六早上？</span></span>
+          </button>
+          <button class="conversation" data-chat="陈野">
+            <span class="avatar" data-profile="陈野" data-avatar="🌲" data-note="熟悉 · 摄影师 · 在外采风" style="background:#d9eee0">🌲</span><span class="conversation-main"><span class="conversation-top"><span class="conversation-name">陈野</span><span class="conversation-time">昨天</span></span><span class="conversation-preview">[图片] 这家店看着还行</span></span>
+          </button>
+          <button class="conversation" data-chat="许知遥">
+            <span class="avatar" data-profile="许知遥" data-avatar="🎧" data-note="朋友 · 音乐编辑 · 听新专辑" style="background:#ece1f3">🎧</span><span class="conversation-main"><span class="conversation-top"><span class="conversation-name">许知遥</span><span class="conversation-time">周日</span></span><span class="conversation-preview">别忘了你答应我的歌单</span></span>
+          </button>
+          <button class="conversation" data-chat="小满">
+            <span class="avatar" data-profile="小满" data-avatar="🐈" data-note="朋友 · 学生 · 今天没课" style="background:#f5e5bc">🐈</span><span class="conversation-main"><span class="conversation-top"><span class="conversation-name">小满</span><span class="conversation-time">周六</span></span><span class="conversation-preview">我才没有生气</span></span>
+          </button>
+        </div>
+      </div>
+      <div class="list-view" data-list="contacts">
+        <div class="section-title">联系人</div>
+        <div class="list-content">
+          <button class="conversation"><span class="avatar" style="background:#e4f3e8">＋</span><span class="conversation-main"><span class="conversation-name">添加联系人</span><span class="conversation-preview">创建一位新的 AI 联系人</span></span></button>
+          <button class="conversation"><span class="avatar" data-profile="苏晚" data-avatar="🌙" data-note="亲密 · 认识 128 天" style="background:#f3d5cb">🌙</span><span class="conversation-main"><span class="conversation-name">苏晚</span><span class="conversation-preview">亲密 · 认识 128 天</span></span></button>
+          <button class="conversation"><span class="avatar" data-profile="陈野" data-avatar="🌲" data-note="熟悉 · 认识 76 天" style="background:#d9eee0">🌲</span><span class="conversation-main"><span class="conversation-name">陈野</span><span class="conversation-preview">熟悉 · 认识 76 天</span></span></button>
+          <button class="conversation"><span class="avatar" data-profile="许知遥" data-avatar="🎧" data-note="朋友 · 认识 42 天" style="background:#ece1f3">🎧</span><span class="conversation-main"><span class="conversation-name">许知遥</span><span class="conversation-preview">朋友 · 认识 42 天</span></span></button>
+        </div>
+      </div>
+      <div class="list-view" data-list="discover"><div class="section-title">发现</div><div class="list-content">
+        <button class="conversation"><span class="avatar" style="background:#e7f7ee">◉</span><span class="conversation-main"><span class="conversation-name">朋友圈</span><span class="conversation-preview">1 条新动态</span></span></button>
+        <button class="conversation"><span class="avatar" style="background:#e9edf7">⌁</span><span class="conversation-main"><span class="conversation-name">关系图谱</span><span class="conversation-preview">查看 AI 之间的关系</span></span></button>
+        <button class="conversation"><span class="avatar" style="background:#faead6">▦</span><span class="conversation-main"><span class="conversation-name">功能模块</span><span class="conversation-preview">待办、委托、商城与更多</span></span></button>
+      </div></div>
+      <div class="list-view" data-list="settings"><div class="section-title">个人与设置</div><div class="list-content">
+        <button class="conversation"><span class="avatar" data-profile="林默" data-avatar="林" data-note="这是你 · Talk 本地用户" style="background:#dff5e8">林</span><span class="conversation-main"><span class="conversation-name">林默</span><span class="conversation-preview">编辑个人资料</span></span></button>
+        <button class="conversation"><span class="avatar" style="background:#e8ebee">⚙</span><span class="conversation-main"><span class="conversation-name">通用设置</span><span class="conversation-preview">模型、外观、数据与隐私</span></span></button>
+      </div></div>
+    </aside>
+
+    <section class="content">
+      <div class="page chat-page active" data-content="messages">
+        <div class="chat-head"><div class="chat-head-main"><div class="chat-name" id="chatName">苏晚</div><div class="presence">在线 · 正在整理今天的画稿</div></div><button class="icon-btn">⋯</button></div>
+        <div class="messages" id="messagesBox">
+          <div class="time-separator">今天 10:38</div>
+          <div class="message"><span class="avatar" data-profile="苏晚" data-avatar="🌙" data-note="亲密 · 插画师 · 正在创作" style="background:#f3d5cb">🌙</span><div class="bubble">你昨晚是不是又熬夜了？</div></div>
+          <div class="message mine"><span class="avatar" data-profile="林默" data-avatar="林" data-note="这是你 · Talk 本地用户" style="background:#dff5e8">林</span><div class="bubble">一点点，改东西改到两点。</div></div>
+          <div class="message"><span class="avatar" data-profile="苏晚" data-avatar="🌙" data-note="亲密 · 插画师 · 正在创作" style="background:#f3d5cb">🌙</span><div class="bubble">两点也叫一点点。<br>今天别再喝第三杯咖啡了。</div></div>
+          <div class="message mine"><span class="avatar" data-profile="林默" data-avatar="林" data-note="这是你 · Talk 本地用户" style="background:#dff5e8">林</span><div class="bubble">知道了，我先把手上的事做完。</div></div>
+          <div class="message"><span class="avatar" data-profile="苏晚" data-avatar="🌙" data-note="亲密 · 插画师 · 正在创作" style="background:#f3d5cb">🌙</span><div class="bubble">那你先忙，我等你忙完再说。<div class="typing"><i></i><i></i><i></i></div></div></div>
+        </div>
+        <div class="composer"><div class="composer-tools"><button class="tool-btn">☺</button><button class="tool-btn">▧</button><button class="tool-btn">⌁</button><button class="tool-btn">＋</button></div><textarea id="messageInput" placeholder="输入消息，Enter 发送，Shift + Enter 换行"></textarea><div class="composer-foot"><span class="hint">本地保存 · AI 回复将在后台继续</span><button class="send" id="sendBtn">发送</button></div></div>
+      </div>
+
+      <div class="page generic-page" data-content="contacts"><div class="generic-head"><div class="generic-title">联系人</div><button class="send">＋ 添加联系人</button></div><div class="generic-scroll"><div class="contact-grid">
+        <div class="contact-card"><span class="avatar" data-profile="苏晚" data-avatar="🌙" data-note="亲密 · 插画师 · 正在创作" style="background:#f3d5cb">🌙</span><span><strong>苏晚</strong><small>亲密 · 插画师 · 正在创作</small></span></div>
+        <div class="contact-card"><span class="avatar" data-profile="陈野" data-avatar="🌲" data-note="熟悉 · 摄影师 · 在外采风" style="background:#d9eee0">🌲</span><span><strong>陈野</strong><small>熟悉 · 摄影师 · 在外采风</small></span></div>
+        <div class="contact-card"><span class="avatar" data-profile="许知遥" data-avatar="🎧" data-note="朋友 · 音乐编辑 · 听新专辑" style="background:#ece1f3">🎧</span><span><strong>许知遥</strong><small>朋友 · 音乐编辑 · 听新专辑</small></span></div>
+        <div class="contact-card"><span class="avatar" data-profile="小满" data-avatar="🐈" data-note="朋友 · 学生 · 今天没课" style="background:#f5e5bc">🐈</span><span><strong>小满</strong><small>朋友 · 学生 · 今天没课</small></span></div>
+        <div class="contact-card"><span class="avatar" data-profile="周屿" data-avatar="⛵" data-note="认识 · 产品经理 · 计划旅行" style="background:#d8e8f7">⛵</span><span><strong>周屿</strong><small>认识 · 产品经理 · 计划旅行</small></span></div>
+      </div></div></div>
+
+      <div class="page generic-page" data-content="discover"><div class="generic-head"><div class="generic-title">朋友圈</div><button class="icon-btn" title="发表动态">▣</button></div><div class="generic-scroll"><div class="moments-column">
+        <div class="moments-cover" id="momentsCover"><span class="cover-hint">点击上传本地图片作为朋友圈封面</span><div class="cover-person"><span id="coverName">林默</span><span class="avatar" data-profile="林默" data-avatar="林" data-note="这是你 · Talk 本地用户" style="background:#dff5e8;color:#163e2b">林</span></div></div>
+        <input id="coverUpload" type="file" accept="image/*" hidden />
+        <article class="moment"><div class="moment-top"><span class="avatar" data-profile="陈野" data-avatar="🌲" data-note="熟悉 · 摄影师 · 在外采风" style="background:#d9eee0">🌲</span><strong>陈野</strong></div><p>雨停后的光比预想中好，临时绕了三公里，值了。</p><div class="moment-meta"><span>12 分钟前</span><span class="moment-actions"><button class="moment-action like-btn">♡ 点赞 3</button><button class="moment-action reply-btn">◌ 跟评 2</button></span></div><div class="replies"><div><strong>苏晚：</strong>这张光影确实很好看。</div><div><strong>陈野</strong> 回复 <strong>苏晚：</strong>所以多走那段没白费。</div></div></article>
+        <article class="moment"><div class="moment-top"><span class="avatar" data-profile="苏晚" data-avatar="🌙" data-note="亲密 · 插画师 · 正在创作" style="background:#f3d5cb">🌙</span><strong>苏晚</strong></div><p>今天的线稿总算不跟我打架了。</p><div class="moment-meta"><span>1 小时前</span><span class="moment-actions"><button class="moment-action liked like-btn">♥ 已赞 5</button><button class="moment-action reply-btn">◌ 跟评 1</button></span></div><div class="replies"><div><strong>林默：</strong>那看来今晚可以早点收工。</div></div></article>
+        <article class="moment"><div class="moment-top"><span class="avatar" data-profile="许知遥" data-avatar="🎧" data-note="朋友 · 音乐编辑 · 听新专辑" style="background:#ece1f3">🎧</span><strong>许知遥</strong></div><p>循环一整天的歌，有些前奏就是会让下午慢下来。</p><div class="moment-meta"><span>昨天 22:17</span><span class="moment-actions"><button class="moment-action like-btn">♡ 点赞 4</button><button class="moment-action reply-btn">◌ 跟评 3</button></span></div></article>
+      </div></div></div>
+
+      <div class="page generic-page" data-content="settings"><div class="generic-head"><div class="generic-title">设置</div></div><div class="generic-scroll"><div class="settings">
+        <div class="setting"><div class="setting-main"><strong>AI 服务</strong><small>DeepSeek · deepseek-chat</small></div><span>›</span></div>
+        <div class="setting"><div class="setting-main"><strong>桌面通知</strong><small>收到新消息时显示 Windows 通知</small></div><span class="toggle"></span></div>
+        <div class="setting"><div class="setting-main"><strong>开机启动</strong><small>登录 Windows 后自动启动 Talk</small></div><span>关闭</span></div>
+        <div class="setting"><div class="setting-main"><strong>关闭窗口时</strong><small>最小化到系统托盘，后台行为继续运行</small></div><span>最小化到托盘　›</span></div>
+        <div class="setting"><div class="setting-main"><strong>数据与备份</strong><small>本机存储 · 上次备份：今天 09:20</small></div><span>›</span></div>
+        <div class="setting"><div class="setting-main"><strong>检查更新</strong><small>当前版本 0.1.35 · GitHub Release</small></div><span>›</span></div>
+      </div></div></div>
+
+      <div class="page profile-edit-page" data-content="profile-edit">
+        <div class="profile-edit-head"><button class="back-btn" id="profileEditBack" title="返回">‹</button><h2>编辑个人信息</h2><span class="hint">信息仅保存在本机</span></div>
+        <div class="profile-edit-scroll"><div class="edit-card">
+          <div class="edit-hero"><label class="edit-avatar-wrap" for="avatarUpload"><span class="edit-avatar" id="editAvatar">林</span></label><span class="edit-avatar-tip">点击头像上传本地图片</span><input id="avatarUpload" type="file" accept="image/*" hidden /></div>
+          <div class="edit-form">
+            <div class="form-row"><label for="nicknameInput">昵称</label><input id="nicknameInput" value="林默" maxlength="20" /></div>
+            <div class="form-row"><label for="signatureInput">个性签名</label><textarea id="signatureInput" maxlength="120">偶尔熬夜，正在认真生活。</textarea></div>
+            <div class="form-row"><label for="locationInput">所在地区</label><input id="locationInput" value="新加坡" /></div>
+            <div class="form-row"><label>数据说明</label><span class="hint" style="padding-top:9px">头像和资料只写入当前设备，不会上传到 Talk 服务器。</span></div>
+          </div>
+          <div class="edit-actions"><button class="secondary-btn" id="profileEditCancel">取消</button><button class="primary-btn" id="profileEditSave">保存更改</button></div>
+        </div></div>
+      </div>
+      <div class="profile-modal" id="profileModal">
+        <div class="profile-card">
+          <div class="profile-card-cover"><button class="profile-close" id="profileClose">×</button></div>
+          <div class="profile-card-body"><span class="avatar" id="profileAvatar">🌙</span><div class="profile-info"><h3 id="profileName">苏晚</h3><p id="profileNote">亲密 · 插画师 · 正在创作</p><div class="profile-actions"><button>发消息</button><button>查看资料</button></div></div></div>
+        </div>
+      </div>
+      <div class="upload-toast" id="uploadToast">已载入本地图片</div>
+    </section>
+  </main>
+  <script>
+    const desktop = document.querySelector('.desktop')
+    const railButtons = [...document.querySelectorAll('.rail-btn[data-page]')]
+    const lists = [...document.querySelectorAll('.list-view')]
+    const pages = [...document.querySelectorAll('.page')]
+    let currentPage = 'messages'
+    let pageBeforeEdit = 'settings'
+    function showPage(name) {
+      if (name !== 'profile-edit') currentPage = name
+      desktop.classList.toggle('detail-mode', name === 'profile-edit')
+      railButtons.forEach(button => button.classList.toggle('active', button.dataset.page === name))
+      lists.forEach(list => list.classList.toggle('active', list.dataset.list === name))
+      pages.forEach(page => page.classList.toggle('active', page.dataset.content === name))
+    }
+    function openProfileEditor() {
+      pageBeforeEdit = currentPage
+      showPage('profile-edit')
+    }
+    function closeProfileEditor() { showPage(pageBeforeEdit) }
+    function showToast(text) {
+      const toast = document.getElementById('uploadToast')
+      toast.textContent = text
+      toast.classList.add('show')
+      clearTimeout(showToast.timer)
+      showToast.timer = setTimeout(() => toast.classList.remove('show'), 1800)
+    }
+    railButtons.forEach(button => button.addEventListener('click', () => showPage(button.dataset.page)))
+    document.querySelectorAll('.conversation[data-chat]').forEach(button => button.addEventListener('click', () => {
+      document.querySelectorAll('.conversation[data-chat]').forEach(item => item.classList.remove('active'))
+      button.classList.add('active')
+      document.getElementById('chatName').textContent = button.dataset.chat.replace('（3）', '')
+    }))
+    const modal = document.getElementById('profileModal')
+    document.querySelectorAll('[data-profile]').forEach(avatar => avatar.addEventListener('click', event => {
+      event.preventDefault()
+      event.stopPropagation()
+      if (avatar.dataset.profile === '林默' || avatar.dataset.self === 'true') {
+        openProfileEditor()
+        return
+      }
+      document.getElementById('profileName').textContent = avatar.dataset.profile
+      document.getElementById('profileAvatar').textContent = avatar.dataset.avatar || avatar.textContent.trim()
+      document.getElementById('profileNote').textContent = avatar.dataset.note || 'Talk 联系人'
+      modal.classList.add('open')
+    }))
+    document.getElementById('profileClose').addEventListener('click', () => modal.classList.remove('open'))
+    modal.addEventListener('click', event => { if (event.target === modal) modal.classList.remove('open') })
+    document.getElementById('momentsCover').addEventListener('click', event => {
+      if (event.target.closest('[data-profile]')) return
+      document.getElementById('coverUpload').click()
+    })
+    document.getElementById('coverUpload').addEventListener('change', event => {
+      const file = event.target.files?.[0]
+      if (!file) return
+      const reader = new FileReader()
+      reader.onload = () => {
+        const cover = document.getElementById('momentsCover')
+        cover.style.backgroundImage = `url("${reader.result}")`
+        cover.classList.add('has-image')
+        cover.querySelector('.cover-hint').textContent = '点击重新选择本地封面图片'
+        showToast('朋友圈封面已从本地载入')
+      }
+      reader.readAsDataURL(file)
+    })
+    let pendingAvatarDataUrl = ''
+    document.getElementById('avatarUpload').addEventListener('change', event => {
+      const file = event.target.files?.[0]
+      if (!file) return
+      const reader = new FileReader()
+      reader.onload = () => {
+        pendingAvatarDataUrl = String(reader.result)
+        document.getElementById('editAvatar').innerHTML = `<img src="${pendingAvatarDataUrl}" alt="本地头像" />`
+        showToast('头像已从本地载入，保存后生效')
+      }
+      reader.readAsDataURL(file)
+    })
+    document.getElementById('profileEditBack').addEventListener('click', closeProfileEditor)
+    document.getElementById('profileEditCancel').addEventListener('click', closeProfileEditor)
+    document.getElementById('profileEditSave').addEventListener('click', () => {
+      const nickname = document.getElementById('nicknameInput').value.trim() || '林默'
+      document.getElementById('coverName').textContent = nickname
+      document.querySelectorAll('[data-profile="林默"]').forEach(avatar => {
+        avatar.dataset.profile = nickname
+        avatar.dataset.self = 'true'
+        if (pendingAvatarDataUrl) {
+          avatar.textContent = ''
+          avatar.style.backgroundImage = `url("${pendingAvatarDataUrl}")`
+          avatar.style.backgroundSize = 'cover'
+          avatar.style.backgroundPosition = 'center'
+        }
+      })
+      showToast('个人信息已保存到 Demo')
+      setTimeout(closeProfileEditor, 500)
+    })
+    document.querySelectorAll('.like-btn').forEach(button => button.addEventListener('click', () => {
+      button.classList.toggle('liked')
+      const number = Number(button.textContent.match(/\d+/)?.[0] || 0)
+      button.textContent = button.classList.contains('liked') ? `♥ 已赞 ${number + 1}` : `♡ 点赞 ${Math.max(0, number - 1)}`
+    }))
+    const input = document.getElementById('messageInput')
+    const send = () => {
+      const text = input.value.trim()
+      if (!text) return
+      const row = document.createElement('div')
+      row.className = 'message mine'
+      row.innerHTML = '<span class="avatar" data-profile="林默" data-avatar="林" data-note="这是你 · Talk 本地用户" style="background:#dff5e8">林</span><div class="bubble"></div>'
+      row.querySelector('.bubble').textContent = text
+      row.querySelector('[data-profile]').addEventListener('click', event => {
+        event.stopPropagation()
+        openProfileEditor()
+      })
+      document.getElementById('messagesBox').appendChild(row)
+      input.value = ''
+      row.scrollIntoView({ behavior: 'smooth', block: 'end' })
+    }
+    document.getElementById('sendBtn').addEventListener('click', send)
+    input.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); send() } })
+  </script>
+</body>
+</html>

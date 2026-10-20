@@ -1,0 +1,28 @@
+appId: com.talk.aichat.desktop
+productName: Talk
+asar: true
+electronDist: node_modules/electron/dist
+directories:
+  output: release/windows-app
+files:
+  - dist/**/*
+  - electron/**/*
+  - package.json
+extraMetadata:
+  main: electron/main.cjs
+win:
+  icon: public/app-icon.ico
+  artifactName: Talk-${version}-${arch}.${ext}
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Talk
+portable:
+  artifactName: Talk-${version}-portable-${arch}.${ext}

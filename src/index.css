@@ -1,0 +1,944 @@
+@import 'tailwindcss';
+
+/*
+ * Tailwind v4's default color palette is defined in oklch() (a color space
+ * Chrome only started supporting around version 111 — several years after
+ * a lot of real-world Android WebViews are stuck on). A real device report
+ * (Honor 60, WebView stuck on Chromium 99) showed the bottom nav's buttons
+ * remaining fully clickable/correctly positioned but visually invisible —
+ * layout-correct, paint-failed is the signature of a CSS value the engine
+ * can't parse: `color: oklch(...)` becomes invalid at computed-value time
+ * on an engine with no oklch() support, and per spec an inherited property
+ * like `color` falls back to whatever the ancestor's color is instead of
+ * erroring, silently making text/icons blend into (or vanish against) the
+ * background rather than throwing anything visible. This isn't scoped to
+ * one component — every gray/red/blue/etc utility class app-wide resolves
+ * through these same custom properties, so overriding them here with their
+ * plain-hex equivalents (identical visual color, just expressed in a color
+ * space every browser back to IE6 understands) fixes it globally in one
+ * place instead of hunting down every affected class. Two earlier fix
+ * attempts (viewport-height sync, removing backdrop-blur) both missed —
+ * this was the actual root cause, found by checking what Tailwind's own
+ * build output actually contained rather than guessing another CSS
+ * property. Values are Tailwind's own pre-v4 (classic) hex palette, so
+ * they're not approximations — they're the same colors Tailwind itself
+ * used before switching to oklch.
+ */
+@theme {
+  --color-red-200: #fecaca;
+  --color-red-700: #b91c1c;
+  --color-amber-800: #92400e;
+  --color-blue-100: #dbeafe;
+  --color-blue-800: #1e40af;
+  --color-gray-50: #f9fafb;
+  --color-gray-100: #f3f4f6;
+  --color-gray-200: #e5e7eb;
+  --color-gray-300: #d1d5db;
+  --color-gray-400: #9ca3af;
+  --color-gray-500: #6b7280;
+  --color-gray-600: #4b5563;
+  --color-gray-700: #374151;
+  --color-gray-800: #1f2937;
+  --color-gray-900: #111827;
+  --color-red-50: #fef2f2;
+  --color-red-100: #fee2e2;
+  --color-red-400: #f87171;
+  --color-red-500: #ef4444;
+  --color-red-600: #dc2626;
+  --color-amber-600: #d97706;
+  --color-amber-50: #fffbeb;
+  --color-amber-100: #fef3c7;
+  --color-amber-200: #fde68a;
+  --color-amber-700: #b45309;
+  --color-yellow-50: #fefce8;
+  --color-green-50: #f0fdf4;
+  --color-green-100: #dcfce7;
+  --color-green-500: #22c55e;
+  --color-green-600: #16a34a;
+  --color-green-700: #15803d;
+  --color-blue-50: #eff6ff;
+  --color-blue-200: #bfdbfe;
+  --color-blue-500: #3b82f6;
+  --color-blue-600: #2563eb;
+  --color-blue-700: #1d4ed8;
+  --color-orange-50: #fff7ed;
+  --color-orange-200: #fed7aa;
+  --color-orange-400: #fb923c;
+  --color-orange-500: #f97316;
+  --color-orange-600: #ea580c;
+  --color-pink-50: #fdf2f8;
+  --color-pink-600: #db2777;
+  --color-purple-50: #faf5ff;
+  --color-purple-100: #f3e8ff;
+  --color-purple-200: #e9d5ff;
+  --color-purple-500: #a855f7;
+  --color-purple-600: #9333ea;
+  --color-purple-700: #7e22ce;
+  --color-purple-800: #6b21a8;
+  --color-purple-900: #581c87;
+  --color-violet-50: #f5f3ff;
+  --color-violet-200: #ddd6fe;
+  --color-violet-500: #8b5cf6;
+  --color-violet-600: #7c3aed;
+  --color-violet-700: #6d28d9;
+  --color-slate-200: #e2e8f0;
+  --color-slate-800: #1e293b;
+  --color-gray-950: #030712;
+}
+
+/* Local, redistributable theme fonts. The files are common-Simplified-Chinese
+   WOFF2 subsets; characters outside their cmap (including Emoji) continue
+   through the explicit system fallback stacks below. Medium is intentionally
+   reused for 600/700 so the UI never requests a synthetic missing face. */
+@font-face {
+  font-family: 'Talk LXGW WenKai';
+  src: url('/fonts/talk-sage-regular.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Talk LXGW WenKai';
+  src: url('/fonts/talk-sage-medium.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Talk GenSen Rounded';
+  src: url('/fonts/talk-fox-regular.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Talk GenSen Rounded';
+  src: url('/fonts/talk-fox-medium.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Talk Noto Serif CJK SC';
+  src: url('/fonts/talk-ink-regular.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Talk Noto Serif CJK SC';
+  src: url('/fonts/talk-ink-medium.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Talk IBM Plex Sans SC';
+  src: url('/fonts/talk-nord-regular.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Talk IBM Plex Sans SC';
+  src: url('/fonts/talk-nord-medium.woff2') format('woff2');
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+}
+
+:root {
+  color-scheme: light;
+  /* Real viewport height in px, kept in sync by main.tsx via window.innerHeight.
+     Some Android WebViews (Capacitor's included) don't compute 100dvh/100vh
+     reliably against the actual visible area once the system nav bar is
+     factored in, so anything that needs "the true screen height" should use
+     this instead of the dvh unit directly. 100dvh here is just the pre-JS
+     fallback for the first paint. */
+  --app-height: 100dvh;
+  --app-top-offset: 0px;
+  --ui-font-system: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', sans-serif;
+  --ui-font-serif-fallback: 'Songti SC', STSong, SimSun, 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', serif;
+  --ui-font-mono: ui-monospace, 'Cascadia Code', 'SFMono-Regular', Consolas, 'Liberation Mono', 'Microsoft YaHei', 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji', monospace;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+@keyframes message-in {
+  from { opacity: 0; transform: translateY(6px) scale(.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes notice-in {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes page-in {
+  from { opacity: .45; }
+  to { opacity: 1; }
+}
+
+.page-transition { animation: page-in 180ms ease-out; }
+
+@keyframes desktop-page-in {
+  from { transform: translateY(5px); filter: brightness(.975); }
+  to { transform: translateY(0); filter: brightness(1); }
+}
+
+/* Keep the desktop chrome opaque and stable; only the right-hand page surface
+   moves slightly as the new route arrives. This preserves motion without
+   exposing the white root background through the entire application shell. */
+.desktop-page-transition { animation: desktop-page-in 170ms ease-out; }
+
+@keyframes soft-pop {
+  0% { transform: scale(.96); }
+  70% { transform: scale(1.02); }
+  100% { transform: scale(1); }
+}
+
+/* A single global switch keeps visual feedback optional without branching every component. */
+:root[data-animations='off'] *,
+:root[data-animations='off'] *::before,
+:root[data-animations='off'] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  transition: transform 140ms ease, opacity 140ms ease, background-color 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+
+button:active:not(:disabled) {
+  transform: scale(.96);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: #f4f4f6;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei',
+    sans-serif;
+}
+
+body {
+  overscroll-behavior: none;
+}
+
+/*
+ * Center a phone-width shell on wide (PC) viewports; full-bleed on real
+ * mobile widths. This is `height`, not `min-height` — every route's own
+ * content is designed to scroll *inside* a bounded flex-1/overflow-y-auto
+ * region (TabLayout's Outlet wrapper for the 5 tab pages, or each
+ * standalone route's own inner scroll div), keeping TopBar/BottomNav fixed.
+ * `min-height` would let .app-shell itself grow to fit long content instead
+ * of capping at the viewport and forcing that overflow into the intended
+ * inner scroll region — confirmed via a real reproduction: with enough
+ * todos, .app-shell grew past the viewport and pushed BottomNav below the
+ * visible area, needing a page-level scroll to reach it (same shape of bug
+ * as the min-h-full clipping issue on standalone routes, just one level
+ * up the tree). No current route actually needs .app-shell to exceed
+ * viewport height, so there's no legitimate case this breaks.
+ */
+.app-shell {
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  height: var(--app-height);
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  overflow: hidden;
+}
+
+#root {
+  box-sizing: border-box;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+:root[data-theme='dark'] #root {
+  background: #111827;
+}
+
+.theme-dark {
+  background: #111827;
+  color: #e5e7eb;
+}
+
+.theme-dark .bg-white {
+  background-color: #111827 !important;
+}
+
+.theme-dark .bg-\[\#f4f4f6\],
+.theme-dark .bg-\[\#ededed\],
+.theme-dark .bg-gray-50,
+.theme-dark .bg-gray-100 {
+  background-color: #1f2937 !important;
+}
+
+.theme-dark .bg-gray-900 {
+  background-color: #f3f4f6 !important;
+}
+
+.theme-dark .text-white {
+  color: #111827 !important;
+}
+
+.theme-dark .text-gray-900,
+.theme-dark .text-gray-800,
+.theme-dark .text-gray-700,
+.theme-dark .text-gray-600 {
+  color: #e5e7eb !important;
+}
+
+.theme-dark .text-gray-500,
+.theme-dark .text-gray-400,
+.theme-dark .text-gray-300 {
+  color: #9ca3af !important;
+}
+
+.theme-dark .border-gray-100,
+.theme-dark .border-gray-200 {
+  border-color: #374151 !important;
+}
+
+.theme-dark input,
+.theme-dark textarea,
+.theme-dark select {
+  background-color: #111827;
+  color: #e5e7eb;
+  border-color: #374151;
+}
+
+.theme-dark input::placeholder,
+.theme-dark textarea::placeholder {
+  color: #6b7280;
+}
+
+.theme-dark .active\:bg-gray-50:active {
+  background-color: #1f2937 !important;
+}
+
+.theme-dark .bg-\[\#95ec69\] {
+  background-color: #166534 !important;
+  color: #f9fafb !important;
+}
+
+@media (min-width: 481px) {
+  .app-shell {
+    height: var(--app-height);
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 20px 60px rgba(0, 0, 0, 0.08);
+  }
+}
+
+/* Electron desktop shell. The business pages still come from the same React
+   route tree as Android; only this outer navigation/layout layer differs. */
+.app-shell[data-desktop='true'] {
+  max-width: none;
+  margin: 0;
+  box-shadow: none;
+  background: #f7f8fa;
+}
+
+.desktop-layout {
+  display: flex;
+  min-height: 0;
+  height: 100%;
+  flex: 1;
+  flex-direction: column;
+}
+
+.desktop-titlebar {
+  -webkit-app-region: drag;
+  display: flex;
+  height: 38px;
+  flex: 0 0 38px;
+  align-items: center;
+  border-bottom: 1px solid #e8e9eb;
+  background: #fbfbfc;
+  color: #686d75;
+  font-size: 12px;
+}
+
+.desktop-titlebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-left: 18px;
+}
+
+.desktop-titlebar-brand img { width: 21px; height: 21px; border-radius: 6px; }
+.desktop-titlebar-drag { flex: 1; height: 100%; }
+.desktop-window-controls { -webkit-app-region: no-drag; display: flex; height: 100%; }
+.desktop-window-controls button { display: grid; width: 46px; place-items: center; background: transparent; color: #555b63; font-size: 13px; }
+.desktop-window-controls button:hover { background: #e9eaec; }
+.desktop-window-controls .desktop-close:hover { color: white; background: #e81123; }
+
+.desktop-body {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: 72px 330px minmax(0, 1fr);
+}
+.desktop-body.desktop-detail-mode { grid-template-columns: 72px 0 minmax(0, 1fr); }
+.desktop-detail-mode .desktop-sidebar { visibility: hidden; }
+
+.desktop-rail {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 0 14px;
+  background: #202225;
+  color: #9da2a9;
+}
+
+.desktop-user-avatar { border-radius: 10px; background: transparent; margin-bottom: 8px; }
+.desktop-user-avatar > * { border-radius: 10px !important; }
+.desktop-rail-button {
+  position: relative;
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+}
+.desktop-rail-button:hover { color: #d9dcdf; background: rgba(255,255,255,.06); }
+.desktop-rail-button.active { color: #55d98f; background: rgba(85,217,143,.1); }
+.desktop-rail-svg { width: 24px; height: 24px; }
+.desktop-rail-spacer { flex: 1; }
+
+.desktop-sidebar {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  border-right: 1px solid #e8e9eb;
+  background: #f7f8fa;
+}
+.desktop-sidebar-search { display: flex; height: 68px; flex: 0 0 68px; gap: 9px; padding: 15px 15px 11px; }
+.desktop-sidebar-search label { display: flex; min-width: 0; flex: 1; align-items: center; gap: 8px; height: 36px; padding: 0 11px; border-radius: 8px; background: #e9eaec; color: #8f949b; }
+.desktop-sidebar-search input { min-width: 0; flex: 1; border: 0; outline: 0; background: transparent; color: #444; font-size: 13px; }
+.desktop-sidebar-search > button { width: 36px; height: 36px; border-radius: 8px; background: #e9eaec; color: #555b63; }
+.desktop-create-menu {
+  position: absolute;
+  z-index: 20;
+  top: 57px;
+  right: 15px;
+  min-width: 148px;
+  padding: 5px;
+  border: 1px solid #e2e4e7;
+  border-radius: 9px;
+  background: #fff;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .14);
+}
+.desktop-create-menu button {
+  display: block;
+  width: 100%;
+  padding: 9px 10px;
+  border-radius: 6px;
+  color: #25282d;
+  font-size: 13px;
+  text-align: left;
+}
+.desktop-create-menu button:hover { background: #f0f1f3; }
+.desktop-sidebar-caption { padding: 4px 18px 8px; color: #8b9098; font-size: 13px; }
+.desktop-sidebar-list { min-height: 0; flex: 1; overflow-y: auto; padding-bottom: 12px; }
+.desktop-list-row {
+  display: flex;
+  width: 100%;
+  min-height: 72px;
+  align-items: center;
+  gap: 11px;
+  padding: 10px 13px 10px 8px;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+}
+.desktop-list-row:hover { background: #f0f1f3; }
+.desktop-list-row.active { background: #dedfe1; }
+.desktop-list-copy { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+.desktop-list-copy strong { overflow: hidden; color: #25282d; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-list-copy small { overflow: hidden; margin-top: 5px; color: #8b9097; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.desktop-list-top { display: flex; min-width: 0; align-items: center; gap: 8px; }
+.desktop-list-top strong { flex: 1; }
+.desktop-list-top time { color: #a3a7ad; font-size: 11px; }
+.desktop-settings-list { padding: 0 10px 16px; }
+.desktop-settings-group { margin-top: 10px; }
+.desktop-settings-group:first-child { margin-top: 2px; }
+.desktop-settings-label { padding: 0 6px 7px; color: var(--ui-text-3); font-size: 11px; font-weight: 600; letter-spacing: .04em; }
+.desktop-settings-card { overflow: hidden; border: 1px solid var(--ui-border-soft); border-radius: var(--ui-radius-card); background: var(--ui-surface); }
+.desktop-settings-card .desktop-list-row { min-height: 62px; padding: 8px 10px; }
+.desktop-settings-card .desktop-list-row + .desktop-list-row { border-top: 1px solid var(--ui-border-soft); }
+.desktop-settings-card .desktop-list-row.active { background: var(--ui-surface-3); }
+.desktop-settings-card .desktop-menu-avatar { width: 42px; height: 42px; flex-basis: 42px; border-radius: var(--ui-radius-control); }
+.desktop-settings-profile { display: flex; width: 100%; align-items: center; gap: 12px; padding: 14px 12px; text-align: left; }
+.desktop-settings-profile:hover, .desktop-settings-profile.active { background: var(--ui-surface-2); }
+.desktop-settings-profile .desktop-list-copy strong { font-size: 16px; }
+.desktop-settings-chevron { color: var(--ui-text-3); font-size: 22px; line-height: 1; }
+.desktop-add-avatar, .desktop-menu-avatar { display: grid; width: 48px; height: 48px; flex: 0 0 48px; place-items: center; border-radius: 11px; background: #e4f3e8; color: #27332c; font-size: 21px; }
+.desktop-menu-avatar { background: #e8ebee; font-size: 18px; }
+.desktop-generation-avatar.failed { background: #fef2f2; color: #ef4444; }
+.desktop-generation-avatar.ready { background: #f0fdf4; color: #16a34a; }
+.desktop-generation-avatar.working { background: var(--ui-special-soft); color: var(--ui-special-ink); }
+
+.desktop-main { min-width: 0; min-height: 0; overflow: hidden; background: #f4f5f6; }
+.desktop-main > * { height: 100% !important; min-height: 0 !important; }
+.desktop-route-loading { display: flex; height: 100%; align-items: center; justify-content: center; gap: 10px; background: #f4f5f6; color: #8b9098; font-size: 13px; }
+.desktop-route-loading-spinner { width: 16px; height: 16px; border: 2px solid #d8dbde; border-top-color: #7c8289; border-radius: 999px; animation: desktop-loading-spin 700ms linear infinite; }
+@keyframes desktop-loading-spin { to { transform: rotate(360deg); } }
+.desktop-empty-pane { display: grid; height: 100%; place-items: center; text-align: center; color: #8b9098; }
+.desktop-empty-pane img { width: 64px; height: 64px; margin: 0 auto 12px; border-radius: 16px; opacity: .8; }
+.desktop-empty-pane h2 { margin: 0; color: #4f555c; font-size: 20px; }
+.desktop-empty-pane p { margin: 8px 0 0; font-size: 13px; }
+
+.desktop-profile-page { display: flex; height: 100%; flex-direction: column; overflow: hidden; background: #f6f7f8; }
+.desktop-profile-head { display: flex; height: 68px; flex: 0 0 68px; align-items: center; gap: 12px; padding: 0 24px; border-bottom: 1px solid #e8e9eb; background: white; }
+.desktop-profile-head button { width: 36px; height: 36px; border-radius: 8px; background: transparent; color: #50565e; font-size: 22px; }
+.desktop-profile-head button:hover { background: #f0f1f3; }
+.desktop-profile-head h1 { flex: 1; margin: 0; font-size: 18px; font-weight: 650; }
+.desktop-profile-head > span { color: #9ca3af; font-size: 11px; }
+.desktop-profile-scroll { min-height: 0; flex: 1; overflow-y: auto; padding: 32px; }
+.desktop-profile-card { width: min(720px, 100%); margin: 0 auto; overflow: hidden; border: 1px solid #e8e9eb; border-radius: 14px; background: white; }
+.desktop-profile-hero { position: relative; height: 140px; background: linear-gradient(135deg, var(--ui-cover-start), var(--ui-cover-end)); }
+.desktop-profile-avatar { position: absolute; left: 28px; bottom: -42px; padding: 0; border: 4px solid white; border-radius: 18px; background: white; box-shadow: 0 4px 12px rgba(0,0,0,.12); }
+.desktop-profile-avatar > div { border-radius: 14px; }
+.desktop-profile-hero > span { position: absolute; left: 126px; bottom: 10px; color: rgba(255,255,255,.96); font-size: 12px; text-shadow: 0 1px 3px rgba(0,0,0,.3); }
+.desktop-profile-form { padding: 64px 28px 28px; }
+.desktop-profile-form > label { display: grid; grid-template-columns: 110px minmax(0, 1fr); align-items: start; gap: 16px; padding: 16px 0; border-bottom: 1px solid #e8e9eb; }
+.desktop-profile-form > label:last-child { border-bottom: 0; }
+.desktop-profile-form > label > span { padding-top: 9px; color: #4e535a; font-size: 13px; }
+.desktop-profile-form input, .desktop-profile-form textarea { width: 100%; border: 1px solid #dfe1e4; border-radius: 8px; outline: 0; padding: 9px 11px; background: #fafbfb; color: #17191c; font-size: 13px; }
+.desktop-profile-form input:focus, .desktop-profile-form textarea:focus { border-color: #65c892; box-shadow: 0 0 0 3px rgba(7,193,96,.09); }
+.desktop-profile-form textarea { min-height: 88px; resize: vertical; }
+.desktop-profile-form small { padding-top: 9px; color: #9ca3af; font-size: 11px; }
+.desktop-profile-options { display: flex; gap: 8px; }
+.desktop-profile-options button { border-radius: 999px; padding: 7px 14px; background: #f0f1f3; color: #62676e; font-size: 12px; }
+.desktop-profile-options button.active { background: #202225; color: white; }
+.desktop-profile-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 18px 28px; border-top: 1px solid #e8e9eb; background: #fafbfb; }
+.desktop-profile-actions button { height: 38px; padding: 0 24px; border-radius: 8px; background: #eceeef; color: #596069; }
+.desktop-profile-actions button.primary { background: #07c160; color: white; }
+.desktop-chat-composer-shell { padding: 12px 14px 14px; border-top: 1px solid var(--ui-border-soft); background: var(--ui-bg) !important; }
+.desktop-chat-composer { display: flex; height: 168px; flex-direction: column; overflow: hidden; border: 1px solid var(--ui-border); border-radius: var(--ui-radius-card); background: var(--ui-surface); }
+.app-shell .desktop-chat-textarea { min-height: 0; flex: 1; resize: none; border: 0; outline: 0; padding: 15px 16px 8px; background: transparent; color: var(--ui-text); font: inherit; font-size: 14px; line-height: 1.65; }
+.desktop-chat-tools { display: flex; min-height: 46px; align-items: center; justify-content: space-between; gap: 16px; padding: 5px 9px 8px 11px; }
+.desktop-chat-tool-group { display: flex; min-width: 0; align-items: center; gap: 2px; color: var(--ui-text-2); }
+.desktop-chat-tool-group button { display: grid; width: 32px; height: 32px; flex: 0 0 32px; place-items: center; border-radius: var(--ui-radius-control); color: inherit; }
+.desktop-chat-tool-group button:hover { background: var(--ui-surface-2); color: var(--ui-text); }
+.desktop-chat-tool-group button:disabled { cursor: wait; opacity: .45; }
+.desktop-chat-tool-divider { width: 1px; height: 18px; margin: 0 5px; background: var(--ui-border-soft); }
+.desktop-chat-send { height: 32px; min-width: 66px; flex: 0 0 auto; border-radius: var(--ui-radius-control); background: var(--ui-action); color: var(--ui-on-action); font-size: 13px; }
+.desktop-chat-send:disabled { background: var(--ui-surface-3); color: var(--ui-text-3); }
+@media (max-height: 650px) {
+  .desktop-chat-composer { height: 128px; }
+  .app-shell .desktop-chat-textarea { padding-top: 10px; }
+}
+.app-shell[data-desktop='true'] .desktop-profile-page > .absolute.inset-0 { position: absolute; inset: 38px 0 0 72px; align-items: center; justify-content: center; }
+.app-shell[data-desktop='true'] .desktop-profile-page > .absolute.inset-0 > div { width: min(560px, calc(100% - 48px)); border-radius: 16px; padding: 20px; box-shadow: 0 24px 70px rgba(0,0,0,.25); }
+
+.app-shell[data-desktop='true'] .desktop-main .h-\[var\(--app-height\)\] { height: 100% !important; }
+.app-shell[data-desktop='true'] .desktop-main .min-h-full { min-height: 100% !important; }
+.app-shell[data-desktop='true'] [data-page-kind='moments'] .moments-scroll { padding: 26px; background: var(--ui-bg); }
+.app-shell[data-desktop='true'] [data-page-kind='moments'] .moments-scroll > * { width: min(760px, 100%); margin-left: auto; margin-right: auto; }
+.app-shell[data-desktop='true'] [data-page-kind='moments'] .moments-cover { height: 240px !important; overflow: hidden; border-radius: 12px; }
+.app-shell[data-desktop='true'] [data-page-kind='moments'] .moments-scroll > .flex-1 { margin-top: 14px; overflow: hidden; border-radius: 12px; }
+.app-shell[data-desktop='true'] [data-page-kind='moments'] .moments-scroll > .flex-1 > div { padding-left: 8px; padding-right: 16px; }
+.app-shell[data-desktop='true'] [data-page-kind='moments'] button[aria-label='评论'],
+.app-shell[data-desktop='true'] [data-page-kind='moments'] button[aria-label='点赞'] { min-width: 76px; height: 38px; padding: 0 14px; border-radius: 9px; background: var(--ui-surface-2); color: var(--ui-link); font-size: 13px; font-weight: 600; }
+
+.theme-dark .desktop-titlebar,
+.theme-dark .desktop-sidebar { background: #181a1d; border-color: #30343a; }
+.theme-dark .desktop-list-row.active { background: #30343a; }
+.theme-dark .desktop-sidebar-search label,
+.theme-dark .desktop-sidebar-search > button { background: #292c31; color: #c7cbd0; }
+.theme-dark .desktop-sidebar-search input { color: #e5e7eb; }
+.theme-dark .desktop-main { background: #111827; }
+
+@media (max-width: 1100px) {
+  .desktop-body { grid-template-columns: 64px 290px minmax(0, 1fr); }
+  .desktop-rail { padding-left: 0; padding-right: 0; }
+}
+
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
+/*
+ * Talk visual contract
+ * --------------------
+ * Pages keep their layout and components; themes only supply semantic color,
+ * type, radius and elevation tokens. Keep values in hex/rgb for the Android
+ * Chromium 99 compatibility requirement documented above.
+ */
+:root,
+:root[data-ui-theme='sage'] {
+  --ui-bg: #f4f6f4;
+  --ui-surface: #fdfefd;
+  --ui-surface-2: #edf2ee;
+  --ui-surface-3: #e0e8e2;
+  --ui-text: #1f2922;
+  --ui-text-2: #647068;
+  --ui-text-3: #919b94;
+  --ui-border: #d8dfd9;
+  --ui-border-soft: #e7ece8;
+  --ui-accent: #27845a;
+  --ui-accent-soft: #e5f3eb;
+  --ui-accent-ink: #1d6d49;
+  --ui-action: #27845a;
+  --ui-on-action: #ffffff;
+  --ui-message-mine: #dff1e7;
+  --ui-rail: #25312a;
+  --ui-rail-text: #aebbb2;
+  --ui-radius-control: 9px;
+  --ui-radius-card: 12px;
+  --ui-shadow: 0 8px 28px rgba(31, 41, 34, .07);
+  --ui-font-body: var(--ui-font-system);
+  --ui-font-display: 'Talk LXGW WenKai', var(--ui-font-system);
+  --ui-font-reading: 'Talk LXGW WenKai', var(--ui-font-system);
+  --ui-font-control: var(--ui-font-system);
+  --ui-special: #27845a; --ui-special-soft: #e5f3eb; --ui-special-ink: #1d6d49; --ui-special-border: #b9d9c7;
+  --ui-info: #2878b5; --ui-info-soft: #e7f2f9; --ui-info-ink: #205f8e;
+  --ui-success: #27845a; --ui-success-soft: #e5f3eb; --ui-success-ink: #1d6d49;
+  --ui-warning: #b36b16; --ui-warning-soft: #fff3dd; --ui-warning-ink: #8b5312;
+  --ui-danger: #d94646; --ui-danger-soft: #fdeaea; --ui-danger-ink: #b52f2f;
+  --ui-link: #526d91; --ui-cover-start: #a9d7bd; --ui-cover-end: #4ca879;
+}
+
+:root[data-ui-theme='forge'] {
+  --ui-bg: #f6f8fa; --ui-surface: #ffffff; --ui-surface-2: #f6f8fa; --ui-surface-3: #eaeef2;
+  --ui-text: #1f2328; --ui-text-2: #59636e; --ui-text-3: #818b98;
+  --ui-border: #d1d9e0; --ui-border-soft: #e6eaef;
+  --ui-accent: #0969da; --ui-accent-soft: #ddf4ff; --ui-accent-ink: #0550ae;
+  --ui-action: #1f883d; --ui-on-action: #ffffff; --ui-message-mine: #ddf4ff;
+  --ui-rail: #24292f; --ui-rail-text: #8c959f;
+  --ui-radius-control: 6px; --ui-radius-card: 6px; --ui-shadow: none;
+  --ui-font-body: var(--ui-font-system); --ui-font-display: var(--ui-font-system);
+  --ui-font-reading: var(--ui-font-system); --ui-font-control: var(--ui-font-system);
+  --ui-special: #0969da; --ui-special-soft: #ddf4ff; --ui-special-ink: #0550ae; --ui-special-border: #b6d7f2;
+  --ui-info: #0969da; --ui-info-soft: #ddf4ff; --ui-info-ink: #0550ae; --ui-success: #1f883d; --ui-success-soft: #dafbe1; --ui-success-ink: #116329;
+  --ui-warning: #9a6700; --ui-warning-soft: #fff8c5; --ui-warning-ink: #7d4e00; --ui-danger: #cf222e; --ui-danger-soft: #ffebe9; --ui-danger-ink: #a40e26;
+  --ui-link: #0969da; --ui-cover-start: #79c0ff; --ui-cover-end: #238636;
+}
+
+:root[data-ui-theme='fox'] {
+  --ui-bg: #f7f7fb; --ui-surface: #ffffff; --ui-surface-2: #f0eff7; --ui-surface-3: #e5e2ef;
+  --ui-text: #1d1133; --ui-text-2: #5b5268; --ui-text-3: #8b8297;
+  --ui-border: #d8d4e4; --ui-border-soft: #ebe8f1;
+  --ui-accent: #7542e5; --ui-accent-soft: #eee7ff; --ui-accent-ink: #592acb;
+  --ui-action: #7542e5; --ui-on-action: #ffffff; --ui-message-mine: #ebe4ff;
+  --ui-rail: #2b153f; --ui-rail-text: #c0b3cb;
+  --ui-radius-control: 12px; --ui-radius-card: 16px; --ui-shadow: 0 10px 30px rgba(65, 39, 90, .10);
+  --ui-font-body: 'Talk GenSen Rounded', var(--ui-font-system);
+  --ui-font-display: 'Talk GenSen Rounded', var(--ui-font-system);
+  --ui-font-reading: 'Talk GenSen Rounded', var(--ui-font-system);
+  --ui-font-control: 'Talk GenSen Rounded', var(--ui-font-system);
+  --ui-special: #7542e5; --ui-special-soft: #eee7ff; --ui-special-ink: #592acb; --ui-special-border: #d7c8fa;
+  --ui-info: #5d62d5; --ui-info-soft: #ececff; --ui-info-ink: #464aa8; --ui-success: #3b9462; --ui-success-soft: #e4f5eb; --ui-success-ink: #287047;
+  --ui-warning: #b66a20; --ui-warning-soft: #fff1df; --ui-warning-ink: #8f5017; --ui-danger: #d94a64; --ui-danger-soft: #fde9ee; --ui-danger-ink: #ac344b;
+  --ui-link: #6744b5; --ui-cover-start: #c5a8ff; --ui-cover-end: #7542e5;
+}
+
+:root[data-ui-theme='ink'] {
+  --ui-bg: #f1f0eb; --ui-surface: #fffefa; --ui-surface-2: #e8e7e1; --ui-surface-3: #dad9d2;
+  --ui-text: #111110; --ui-text-2: #4e4e49; --ui-text-3: #777770;
+  --ui-border: #191918; --ui-border-soft: rgba(25, 25, 24, .22);
+  --ui-accent: #111110; --ui-accent-soft: #e4e3dc; --ui-accent-ink: #111110;
+  --ui-action: #111110; --ui-on-action: #fffefa; --ui-message-mine: #111110;
+  --ui-rail: #fffefa; --ui-rail-text: #4e4e49;
+  --ui-radius-control: 8px; --ui-radius-card: 12px; --ui-shadow: none;
+  --ui-font-body: 'Talk Noto Serif CJK SC', var(--ui-font-serif-fallback);
+  --ui-font-display: 'Talk Noto Serif CJK SC', var(--ui-font-serif-fallback);
+  --ui-font-reading: 'Talk Noto Serif CJK SC', var(--ui-font-serif-fallback);
+  --ui-font-control: 'Talk Noto Serif CJK SC', var(--ui-font-serif-fallback);
+  --ui-special: #111110; --ui-special-soft: #e4e3dc; --ui-special-ink: #111110; --ui-special-border: #a3a29a;
+  --ui-info: #2f566f; --ui-info-soft: #e2eaee; --ui-info-ink: #203f53; --ui-success: #356449; --ui-success-soft: #e2ebe5; --ui-success-ink: #294d38;
+  --ui-warning: #815d2d; --ui-warning-soft: #eee6d8; --ui-warning-ink: #60431e; --ui-danger: #8d3535; --ui-danger-soft: #efe1df; --ui-danger-ink: #6b2626;
+  --ui-link: #3c5565; --ui-cover-start: #a6a49a; --ui-cover-end: #2b2b28;
+}
+
+:root[data-ui-theme='nord'] {
+  --ui-bg: #e9eef2; --ui-surface: #f8fafb; --ui-surface-2: #e2e9ee; --ui-surface-3: #d4dee5;
+  --ui-text: #192832; --ui-text-2: #536773; --ui-text-3: #7d909b;
+  --ui-border: #b9c7d0; --ui-border-soft: #d3dde3;
+  --ui-accent: #2e6f9e; --ui-accent-soft: #dbe9f2; --ui-accent-ink: #225a81;
+  --ui-action: #2e6f9e; --ui-on-action: #ffffff; --ui-message-mine: #d8e8f2;
+  --ui-rail: #1e2d37; --ui-rail-text: #9daeb8;
+  --ui-radius-control: 3px; --ui-radius-card: 5px; --ui-shadow: 0 4px 12px rgba(25, 40, 50, .08);
+  --ui-font-body: 'Talk IBM Plex Sans SC', var(--ui-font-system);
+  --ui-font-display: 'Talk IBM Plex Sans SC', var(--ui-font-system);
+  --ui-font-reading: 'Talk IBM Plex Sans SC', var(--ui-font-system);
+  --ui-font-control: 'Talk IBM Plex Sans SC', var(--ui-font-system);
+  --ui-special: #2e6f9e; --ui-special-soft: #dbe9f2; --ui-special-ink: #225a81; --ui-special-border: #aac7da;
+  --ui-info: #2e6f9e; --ui-info-soft: #dbe9f2; --ui-info-ink: #225a81; --ui-success: #3d8062; --ui-success-soft: #dcebe3; --ui-success-ink: #2b6449;
+  --ui-warning: #a36d2f; --ui-warning-soft: #f4e9d8; --ui-warning-ink: #7b5020; --ui-danger: #b94d53; --ui-danger-soft: #f2dfe1; --ui-danger-ink: #91373d;
+  --ui-link: #2e6f9e; --ui-cover-start: #91b5c9; --ui-cover-end: #3c718d;
+}
+
+:root[data-ui-theme='wetalk'] {
+  --ui-bg: #ededed; --ui-surface: #ffffff; --ui-surface-2: #f5f5f5; --ui-surface-3: #e5e5e5;
+  --ui-text: #191919; --ui-text-2: #7f7f7f; --ui-text-3: #b2b2b2;
+  --ui-border: rgba(0,0,0,.16); --ui-border-soft: rgba(0,0,0,.10);
+  --ui-accent: #07c160; --ui-accent-soft: #e6f7ee; --ui-accent-ink: #059b4d;
+  --ui-action: #07c160; --ui-on-action: #ffffff; --ui-message-mine: #95ec69;
+  --ui-rail: #2e2e2e; --ui-rail-text: #b9b9b9;
+  --ui-radius-control: 5px; --ui-radius-card: 6px; --ui-shadow: none;
+  --ui-font-body: var(--ui-font-system); --ui-font-display: var(--ui-font-system);
+  --ui-font-reading: var(--ui-font-system); --ui-font-control: var(--ui-font-system);
+  --ui-special: #07c160; --ui-special-soft: #e6f7ee; --ui-special-ink: #059b4d; --ui-special-border: #a8ddc0;
+  --ui-info: #576b95; --ui-info-soft: #e8edf5; --ui-info-ink: #405476; --ui-success: #07c160; --ui-success-soft: #e6f7ee; --ui-success-ink: #059b4d;
+  --ui-warning: #c87d2f; --ui-warning-soft: #fff1df; --ui-warning-ink: #9d5e20; --ui-danger: #fa5151; --ui-danger-soft: #fde8e8; --ui-danger-ink: #c93c3c;
+  --ui-link: #576b95; --ui-cover-start: #8aa5a0; --ui-cover-end: #3e5f58;
+}
+
+:root[data-theme='dark'][data-ui-theme='sage'] {
+  --ui-bg: #151a17; --ui-surface: #1c221e; --ui-surface-2: #242d27; --ui-surface-3: #303c34;
+  --ui-text: #edf4ef; --ui-text-2: #b6c2ba; --ui-text-3: #829087; --ui-border: #35443a; --ui-border-soft: #2b372f;
+  --ui-accent: #62b78b; --ui-accent-soft: #243d30; --ui-accent-ink: #91d2ad; --ui-action: #3f9d6c;
+  --ui-message-mine: #284a37; --ui-rail: #101411; --ui-rail-text: #91a096; --ui-shadow: 0 10px 34px rgba(0,0,0,.24);
+  --ui-special: #62b78b; --ui-special-soft: #243d30; --ui-special-ink: #91d2ad; --ui-special-border: #355b46;
+  --ui-info: #62a6d1; --ui-info-soft: #203746; --ui-info-ink: #91c8e8; --ui-success: #62b78b; --ui-success-soft: #243d30; --ui-success-ink: #91d2ad;
+  --ui-warning: #d59a50; --ui-warning-soft: #3b2d20; --ui-warning-ink: #efbc79; --ui-danger: #e56b6b; --ui-danger-soft: #402426; --ui-danger-ink: #f29a9a;
+  --ui-link: #91aacb; --ui-cover-start: #3c6650; --ui-cover-end: #20392b;
+}
+:root[data-theme='dark'][data-ui-theme='forge'] {
+  --ui-bg: #0d1117; --ui-surface: #161b22; --ui-surface-2: #21262d; --ui-surface-3: #30363d;
+  --ui-text: #e6edf3; --ui-text-2: #8b949e; --ui-text-3: #6e7681; --ui-border: #30363d; --ui-border-soft: #272c33;
+  --ui-accent: #58a6ff; --ui-accent-soft: #1f3b57; --ui-accent-ink: #79c0ff; --ui-action: #238636;
+  --ui-message-mine: #1f3b57; --ui-rail: #010409; --ui-rail-text: #8b949e;
+  --ui-special: #58a6ff; --ui-special-soft: #1f3b57; --ui-special-ink: #79c0ff; --ui-special-border: #315d83;
+  --ui-info: #58a6ff; --ui-info-soft: #1f3b57; --ui-info-ink: #79c0ff; --ui-success: #3fb950; --ui-success-soft: #1a3522; --ui-success-ink: #56d364;
+  --ui-warning: #d29922; --ui-warning-soft: #3b2e16; --ui-warning-ink: #e3b341; --ui-danger: #f85149; --ui-danger-soft: #442326; --ui-danger-ink: #ff7b72;
+  --ui-link: #58a6ff; --ui-cover-start: #285780; --ui-cover-end: #1d5130;
+}
+:root[data-theme='dark'][data-ui-theme='fox'] {
+  --ui-bg: #171020; --ui-surface: #21172d; --ui-surface-2: #2d203d; --ui-surface-3: #3a2b4d;
+  --ui-text: #fbf8ff; --ui-text-2: #c5b8d2; --ui-text-3: #9686a6; --ui-border: #4a395d; --ui-border-soft: #382b48;
+  --ui-accent: #ab71ff; --ui-accent-soft: #3a2557; --ui-accent-ink: #d2b4ff; --ui-action: #9059ff;
+  --ui-message-mine: #3b2855; --ui-rail: #100817; --ui-rail-text: #a798b4; --ui-shadow: 0 12px 38px rgba(0,0,0,.28);
+  --ui-special: #ab71ff; --ui-special-soft: #3a2557; --ui-special-ink: #d2b4ff; --ui-special-border: #5f4380;
+  --ui-info: #8e94ff; --ui-info-soft: #2d315b; --ui-info-ink: #bdc0ff; --ui-success: #60b883; --ui-success-soft: #203b2d; --ui-success-ink: #8bd4a7;
+  --ui-warning: #d99048; --ui-warning-soft: #432e20; --ui-warning-ink: #efb477; --ui-danger: #ed6b80; --ui-danger-soft: #47242e; --ui-danger-ink: #f6a0ae;
+  --ui-link: #b298e8; --ui-cover-start: #68499a; --ui-cover-end: #352045;
+}
+:root[data-theme='dark'][data-ui-theme='ink'] {
+  --ui-bg: #10100f; --ui-surface: #181817; --ui-surface-2: #22221f; --ui-surface-3: #31312d;
+  --ui-text: #f5f4ee; --ui-text-2: #c7c6be; --ui-text-3: #92918a; --ui-border: #e8e7e1; --ui-border-soft: rgba(232,231,225,.24);
+  --ui-accent: #f5f4ee; --ui-accent-soft: #2b2b27; --ui-accent-ink: #f5f4ee; --ui-action: #f5f4ee; --ui-on-action: #111110;
+  --ui-message-mine: #f5f4ee; --ui-rail: #10100f; --ui-rail-text: #c7c6be;
+  --ui-special: #f5f4ee; --ui-special-soft: #2b2b27; --ui-special-ink: #f5f4ee; --ui-special-border: #66655f;
+  --ui-info: #8eb1c5; --ui-info-soft: #24313a; --ui-info-ink: #bdd4e0; --ui-success: #7eae8d; --ui-success-soft: #24332a; --ui-success-ink: #acd0b7;
+  --ui-warning: #c5a06a; --ui-warning-soft: #393024; --ui-warning-ink: #dbc08f; --ui-danger: #c87878; --ui-danger-soft: #3c2827; --ui-danger-ink: #e0a3a3;
+  --ui-link: #a8bfcd; --ui-cover-start: #66645d; --ui-cover-end: #292927;
+}
+:root[data-theme='dark'][data-ui-theme='nord'] {
+  --ui-bg: #111820; --ui-surface: #18232b; --ui-surface-2: #22313b; --ui-surface-3: #2c3e49;
+  --ui-text: #e8f0f4; --ui-text-2: #aab9c2; --ui-text-3: #788e9b; --ui-border: #3b5260; --ui-border-soft: #2b3c46;
+  --ui-accent: #75b4dd; --ui-accent-soft: #203d50; --ui-accent-ink: #9acbeb; --ui-action: #3c82ad;
+  --ui-message-mine: #203d50; --ui-rail: #0c1318; --ui-rail-text: #8fa3af;
+  --ui-special: #75b4dd; --ui-special-soft: #203d50; --ui-special-ink: #9acbeb; --ui-special-border: #3b6178;
+  --ui-info: #75b4dd; --ui-info-soft: #203d50; --ui-info-ink: #9acbeb; --ui-success: #67ad88; --ui-success-soft: #203b2f; --ui-success-ink: #91c9aa;
+  --ui-warning: #c79a62; --ui-warning-soft: #3b3024; --ui-warning-ink: #dfb985; --ui-danger: #d16e74; --ui-danger-soft: #40272b; --ui-danger-ink: #e79ba0;
+  --ui-link: #91c5e5; --ui-cover-start: #486f85; --ui-cover-end: #253f4d;
+}
+:root[data-theme='dark'][data-ui-theme='wetalk'] {
+  --ui-bg: #111111; --ui-surface: #191919; --ui-surface-2: #1e1e1e; --ui-surface-3: #2c2c2c;
+  --ui-text: rgba(255,255,255,.8); --ui-text-2: rgba(255,255,255,.5); --ui-text-3: rgba(255,255,255,.3);
+  --ui-border: rgba(255,255,255,.15); --ui-border-soft: rgba(255,255,255,.10);
+  --ui-accent: #07c160; --ui-accent-soft: #173d28; --ui-accent-ink: #3eb575; --ui-action: #07c160; --ui-on-action: #ffffff;
+  --ui-message-mine: #3eb575; --ui-rail: #111111; --ui-rail-text: rgba(255,255,255,.5);
+  --ui-special: #07c160; --ui-special-soft: #173d28; --ui-special-ink: #3eb575; --ui-special-border: #286744;
+  --ui-info: #7d90a9; --ui-info-soft: #27313d; --ui-info-ink: #a7b5c6; --ui-success: #3eb575; --ui-success-soft: #173d28; --ui-success-ink: #6dcea0;
+  --ui-warning: #c87d2f; --ui-warning-soft: #3a2c1d; --ui-warning-ink: #e0a15e; --ui-danger: #fa5151; --ui-danger-soft: #442020; --ui-danger-ink: #ff8585;
+  --ui-link: #7d90a9; --ui-cover-start: #4b625e; --ui-cover-end: #233a35;
+}
+
+html, body, #root { background: var(--ui-bg); font-family: var(--ui-font-body); }
+.app-shell { background: var(--ui-bg); color: var(--ui-text); font-family: var(--ui-font-body); }
+.app-shell button, .app-shell input, .app-shell textarea, .app-shell select { font-family: var(--ui-font-control); }
+.app-shell .ui-font-display { font-family: var(--ui-font-display); }
+.app-shell .ui-font-reading { font-family: var(--ui-font-reading); }
+.app-shell .font-mono { font-family: var(--ui-font-mono) !important; }
+.app-shell .font-sans { font-family: var(--ui-font-body) !important; }
+
+/* Semantic page-layout primitives. Pages choose a composition that matches
+   their task, but share one vocabulary for hierarchy, spacing and states. */
+.ui-page { display: flex; height: var(--app-height); flex-direction: column; overflow: hidden; background: var(--ui-bg); }
+.ui-page-scroll { min-height: 0; flex: 1; overflow-y: auto; padding-bottom: calc(1.5rem + env(safe-area-inset-bottom)); }
+.ui-page-intro { border-bottom: 1px solid var(--ui-border-soft); background: var(--ui-surface); padding: 20px 16px 18px; }
+.ui-page-intro + .ui-section-card,
+.ui-page-intro + .ui-list-card,
+.ui-page-intro + .ui-empty-state { margin-top: 12px; }
+.ui-page-kicker { color: var(--ui-text-3); font-size: 12px; font-weight: 600; }
+.ui-page-title { margin-top: 4px; color: var(--ui-text); font-family: var(--ui-font-display); font-size: 20px; font-weight: 650; line-height: 1.3; }
+.ui-page-summary { margin-top: 8px; color: var(--ui-text-3); font-size: 12px; line-height: 1.65; }
+.ui-section-label { margin: 0; padding: 20px 16px 8px; color: var(--ui-text-3); font-size: 12px; font-weight: 600; }
+.ui-section-card { margin: 0 16px; border-radius: var(--ui-radius-card); background: var(--ui-surface); padding: 16px; box-shadow: var(--ui-shadow); }
+.ui-section-card.ui-section-spaced { margin-top: 12px; }
+.ui-section-card.ui-section-flush { margin-left: 0; margin-right: 0; }
+.ui-section-title { color: var(--ui-text); font-family: var(--ui-font-display); font-size: 14px; font-weight: 650; }
+.ui-section-summary { margin-top: 4px; color: var(--ui-text-3); font-size: 11px; line-height: 1.6; }
+.ui-list-card { margin: 0 16px; overflow: hidden; border-radius: var(--ui-radius-card); background: var(--ui-surface); box-shadow: var(--ui-shadow); }
+.ui-list-card.ui-section-spaced { margin-top: 12px; }
+.ui-list-row { display: flex; width: 100%; min-height: 52px; align-items: center; justify-content: space-between; gap: 12px; border-bottom: 1px solid var(--ui-border-soft); padding: 12px 16px; color: var(--ui-text); text-align: left; }
+.ui-list-row:last-child { border-bottom: 0; }
+.ui-list-row:active { background: var(--ui-surface-2); }
+.ui-list-label { min-width: 0; flex: 1; font-size: 15px; }
+.ui-list-note { color: var(--ui-text-3); font-size: 12px; text-align: right; }
+.ui-soft-block { border-radius: var(--ui-radius-control); background: var(--ui-surface-2); padding: 12px; }
+.ui-empty-state { margin: 16px 16px 0; border-radius: var(--ui-radius-card); background: var(--ui-surface); padding: 40px 20px; color: var(--ui-text-3); text-align: center; box-shadow: var(--ui-shadow); }
+.ui-empty-state.ui-section-flush { margin-left: 0; margin-right: 0; }
+.ui-primary-action { border-radius: var(--ui-radius-control); background: var(--ui-action); color: var(--ui-on-action); }
+.ui-secondary-action { display: block; width: 100%; border: 1px solid var(--ui-border); border-radius: var(--ui-radius-control); background: var(--ui-surface-2); padding: 12px 16px; color: var(--ui-text-2); font-size: 14px; font-weight: 500; text-align: center; }
+.ui-danger-action { border-radius: var(--ui-radius-control); background: var(--ui-danger-soft); color: var(--ui-danger-ink); }
+.desktop-list-copy strong { font-family: var(--ui-font-display); }
+
+/* Theme cards preview their own typography before selection. This changes
+   only font rendering; the existing card structure and spacing stay intact. */
+.appearance-theme-card[data-preview-theme='sage'] .appearance-theme-font-preview { font-family: 'Talk LXGW WenKai', var(--ui-font-system); }
+.appearance-theme-card[data-preview-theme='forge'] .appearance-theme-font-preview { font-family: var(--ui-font-system); }
+.appearance-theme-card[data-preview-theme='fox'] .appearance-theme-font-preview { font-family: 'Talk GenSen Rounded', var(--ui-font-system); }
+.appearance-theme-card[data-preview-theme='ink'] .appearance-theme-font-preview { font-family: 'Talk Noto Serif CJK SC', var(--ui-font-serif-fallback); }
+.appearance-theme-card[data-preview-theme='nord'] .appearance-theme-font-preview { font-family: 'Talk IBM Plex Sans SC', var(--ui-font-system); }
+.appearance-theme-card[data-preview-theme='wetalk'] .appearance-theme-font-preview { font-family: var(--ui-font-system); }
+.app-shell .bg-white { background-color: var(--ui-surface) !important; }
+.app-shell .bg-gray-50, .app-shell .bg-gray-100,
+.app-shell .bg-\[\#f4f4f6\], .app-shell .bg-\[\#f4f5f6\], .app-shell .bg-\[\#f7f8fa\], .app-shell .bg-\[\#ededed\] { background-color: var(--ui-bg) !important; }
+.app-shell .bg-gray-200 { background-color: var(--ui-surface-3) !important; }
+.app-shell .bg-gray-900, .app-shell .bg-\[\#07c160\] { background-color: var(--ui-action) !important; color: var(--ui-on-action) !important; }
+.app-shell .bg-\[\#95ec69\] { background-color: var(--ui-message-mine) !important; color: var(--ui-text) !important; }
+:root[data-ui-theme='ink'] .app-shell .bg-\[\#95ec69\] { color: var(--ui-on-action) !important; }
+.app-shell .text-gray-900, .app-shell .text-gray-800, .app-shell .text-gray-700 { color: var(--ui-text) !important; }
+.app-shell .text-gray-600, .app-shell .text-gray-500 { color: var(--ui-text-2) !important; }
+.app-shell .text-gray-400, .app-shell .text-gray-300 { color: var(--ui-text-3) !important; }
+.app-shell .text-\[\#576b95\] { color: var(--ui-link) !important; }
+.app-shell .text-\[\#07a651\] { color: var(--ui-success-ink) !important; }
+.app-shell .border-gray-100 { border-color: var(--ui-border-soft) !important; }
+.app-shell .border-gray-200, .app-shell .border-gray-300 { border-color: var(--ui-border) !important; }
+.app-shell input, .app-shell textarea, .app-shell select { background-color: var(--ui-surface-2); border-color: var(--ui-border); color: var(--ui-text); }
+.app-shell input::placeholder, .app-shell textarea::placeholder { color: var(--ui-text-3); }
+.app-shell .active\:bg-gray-50:active { background-color: var(--ui-surface-2) !important; }
+.app-shell .rounded-sm, .app-shell .rounded-md, .app-shell .rounded-lg { border-radius: var(--ui-radius-control); }
+.app-shell .rounded-xl, .app-shell .rounded-2xl, .app-shell .rounded-3xl { border-radius: var(--ui-radius-card); }
+.app-shell .shadow-sm, .app-shell .shadow-md, .app-shell .shadow-lg { box-shadow: var(--ui-shadow); }
+
+/* Ordinary status components consume theme semantics instead of owning a
+   fixed Tailwind palette. Content-bearing exceptions are explicitly tagged
+   data-ui-scope="special" and keep their meaningful native colors below. */
+.app-shell [data-ui-scope='standard'] { color: inherit; }
+.app-shell [data-ui-scope='special'] { isolation: isolate; }
+.app-shell :is(.bg-blue-50, .bg-blue-100) { background-color: var(--ui-info-soft) !important; }
+.app-shell :is(.text-blue-500, .text-blue-600, .text-blue-700) { color: var(--ui-info-ink) !important; }
+.app-shell :is(.border-blue-200, .border-blue-300) { border-color: var(--ui-info) !important; }
+.app-shell :is(.bg-green-50, .bg-green-100, .bg-\[\#f0fff5\]) { background-color: var(--ui-success-soft) !important; }
+.app-shell :is(.bg-green-500, .bg-green-600) { background-color: var(--ui-success) !important; }
+.app-shell :is(.text-green-500, .text-green-600, .text-green-700) { color: var(--ui-success-ink) !important; }
+.app-shell :is(.border-green-200, .border-green-300) { border-color: var(--ui-success) !important; }
+.app-shell :is(.bg-amber-50, .bg-amber-100, .bg-yellow-50, .bg-orange-50) { background-color: var(--ui-warning-soft) !important; }
+.app-shell :is(.text-amber-600, .text-amber-700, .text-orange-500, .text-orange-600) { color: var(--ui-warning-ink) !important; }
+.app-shell :is(.border-amber-200, .border-orange-200) { border-color: var(--ui-warning) !important; }
+.app-shell :is(.bg-red-50, .bg-red-100, .bg-pink-50) { background-color: var(--ui-danger-soft) !important; }
+.app-shell :is(.bg-red-500, .bg-red-600) { background-color: var(--ui-danger) !important; }
+.app-shell :is(.text-red-400, .text-red-500, .text-red-600, .text-pink-600) { color: var(--ui-danger-ink) !important; }
+
+/* Special scopes represent information, not chrome. Preserve recognisable
+   unread, finance and map colors while still sharing spacing and typography. */
+.app-shell [data-ui-scope='special'] .bg-red-500,
+.app-shell [data-ui-scope='special'].bg-red-500 { background-color: #ef4444 !important; }
+.app-shell [data-ui-scope='special'] :is(.border-orange-200),
+.app-shell [data-ui-scope='special'].border-orange-200 { border-color: #fed7aa !important; }
+.ui-cover-gradient { background: linear-gradient(135deg, var(--ui-cover-start), var(--ui-cover-end)); }
+.finance-card { background: linear-gradient(135deg, #fb923c, #ef4444); }
+
+/* Schedule blocks are information-bearing. Their small, explicitly scoped
+   palette stays stable across themes; surrounding calendar chrome uses the
+   normal semantic tokens above. */
+.schedule-week-scroll { overflow: visible; border: 1px solid var(--ui-border); border-radius: var(--ui-radius-card); background: var(--ui-surface); }
+.schedule-week-header { z-index: 1; display: grid; grid-template-columns: 2.6rem repeat(7, minmax(0, 1fr)); border-bottom: 1px solid var(--ui-border); background: var(--ui-surface); }
+.schedule-week-header > span { min-height: 46px; padding-top: 6px; color: var(--ui-text-2); text-align: center; font-size: 12px; }
+.schedule-week-header b { display: block; margin-top: 2px; color: var(--ui-text); font-size: 15px; font-weight: 500; }
+.schedule-week-header .schedule-week-today { color: var(--ui-danger-ink); }
+.schedule-week-header .schedule-week-today b { width: 24px; height: 24px; margin: 2px auto 0; padding-top: 4px; border-radius: 999px; background: var(--ui-danger-soft); color: var(--ui-danger-ink); }
+.schedule-week-body { position: relative; display: grid; grid-template-columns: 2.6rem repeat(7, minmax(0, 1fr)); min-height: 528px; }
+.schedule-week-hours { position: relative; border-right: 1px solid var(--ui-border-soft); }
+.schedule-week-hours span { position: absolute; right: 5px; transform: translateY(-7px); color: var(--ui-text-3); font-size: 11px; line-height: 14px; }
+.schedule-week-day { position: relative; min-width: 0; border-right: 1px solid var(--ui-border-soft); background-image: repeating-linear-gradient(to bottom, transparent 0, transparent 21px, var(--ui-border-soft) 21px, var(--ui-border-soft) 22px); }
+.schedule-week-day:last-child { border-right: 0; }
+.schedule-week-event { position: absolute; right: 2px; left: 3px; z-index: 2; overflow: hidden; border-left: 2px solid; border-radius: var(--ui-radius-control); padding: 2px; }
+.schedule-week-add { position: absolute; right: 4px; left: 4px; z-index: 3; height: 18px; transform: translateY(-9px); border: 1px dashed var(--ui-border); border-radius: var(--ui-radius-control); background: var(--ui-surface); color: var(--ui-text-2); font-size: 15px; line-height: 15px; }
+.schedule-week-event-title { display: flex; min-height: 100%; align-items: center; justify-content: center; overflow: hidden; padding: 1px; text-align: center; word-break: break-all; font-weight: 500; line-height: 1.12; }
+.schedule-week-event-phone { position: absolute; right: 2px; bottom: 1px; display: flex; opacity: .82; }
+.schedule-week-event--work { border-color: #4ade80; background: #eef6f1; color: #276749; }
+.schedule-week-event--personal { border-color: #a78bfa; background: #f5efff; color: #6d3cb0; }
+.schedule-week-event--rest { border-color: #9ca3af; background: #edf4ff; color: #475569; }
+.schedule-week-event--special { border-color: #f59e0b; background: #f7f0e8; color: #92400e; }
+.schedule-week-event--current { border-color: #ef4444; background: #fff3f0; color: #b91c1c; box-shadow: 0 0 0 2px rgba(239, 68, 68, .16); }
+.schedule-week-now { position: absolute; z-index: 4; right: 0; left: 0; height: 2px; background: #ef4444; pointer-events: none; }
+.schedule-week-now i { position: absolute; top: -4px; left: -4px; width: 9px; height: 9px; border-radius: 999px; background: #ef4444; }
+.schedule-week-legend { display: flex; flex-wrap: wrap; gap: 6px 10px; padding-top: 10px; color: var(--ui-text-2); font-size: 10px; }
+.schedule-week-legend > span { display: flex; align-items: center; gap: 4px; }
+.schedule-week-swatch { width: 10px; height: 10px; border-left: 2px solid; border-radius: 2px; }
+.schedule-week-swatch--work { border-color: #4ade80; background: #eef6f1; }.schedule-week-swatch--personal { border-color: #a78bfa; background: #f5efff; }.schedule-week-swatch--rest { border-color: #9ca3af; background: #edf4ff; }.schedule-week-swatch--special { border-color: #f59e0b; background: #f7f0e8; }.schedule-week-swatch--current { border-color: #ef4444; background: #fff3f0; }
+@media (min-width: 800px) { .schedule-week-scroll { max-width: 680px; margin: 0 auto; } }
+
+:root[data-ui-theme='fox'] .app-shell button.bg-gray-900,
+:root[data-ui-theme='fox'] .app-shell button.bg-\[\#07c160\] { border-radius: 999px; }
+:root[data-ui-theme='ink'] .app-shell button { letter-spacing: .01em; }
+
+/* Desktop shell consumes the same contract rather than maintaining a second palette. */
+.app-shell[data-desktop='true'], .desktop-main, .desktop-route-loading, .desktop-profile-page { background: var(--ui-bg); }
+.desktop-titlebar, .desktop-sidebar, .desktop-profile-head, .desktop-profile-card, .desktop-profile-actions { background: var(--ui-surface); border-color: var(--ui-border-soft); color: var(--ui-text-2); }
+.desktop-rail { background: var(--ui-rail); color: var(--ui-rail-text); }
+.desktop-rail-button.active { color: var(--ui-accent); background: var(--ui-accent-soft); }
+.desktop-sidebar-search label, .desktop-sidebar-search > button { background: var(--ui-surface-2); color: var(--ui-text-2); border-radius: var(--ui-radius-control); }
+.desktop-sidebar-search input { color: var(--ui-text); }
+.desktop-sidebar-caption, .desktop-list-copy small, .desktop-list-top time { color: var(--ui-text-3); }
+.desktop-list-copy strong, .desktop-empty-pane h2 { color: var(--ui-text); }
+.desktop-list-row:hover { background: var(--ui-surface-2); }
+.desktop-list-row.active { background: var(--ui-surface-3); }
+.desktop-add-avatar, .desktop-menu-avatar { background: var(--ui-accent-soft); color: var(--ui-accent-ink); border-radius: var(--ui-radius-card); }
+.desktop-profile-card { border-radius: var(--ui-radius-card); box-shadow: var(--ui-shadow); }
+.desktop-profile-form input, .desktop-profile-form textarea { background: var(--ui-surface-2); border-color: var(--ui-border); color: var(--ui-text); border-radius: var(--ui-radius-control); }
+.desktop-profile-options button, .desktop-profile-actions button { background: var(--ui-surface-2); color: var(--ui-text-2); }
+.desktop-profile-options button.active, .desktop-profile-actions button.primary { background: var(--ui-action); color: var(--ui-on-action); }
+
+/* Appearance picker: these miniature previews intentionally retain their own
+   palette so all choices remain recognizable while another theme is active. */
+.appearance-panel, .appearance-theme-card { border-radius: var(--ui-radius-card); box-shadow: var(--ui-shadow); }
+.appearance-mode-switch, .appearance-mode-option { border-radius: var(--ui-radius-control); }
+.appearance-theme-card { border-color: var(--ui-border); }
+.appearance-theme-card.is-selected { border-color: var(--ui-accent); box-shadow: 0 0 0 2px var(--ui-accent-soft); }
+.appearance-check { background: transparent; }
+.appearance-theme-card.is-selected .appearance-check { background: var(--ui-action); color: var(--ui-on-action); }
+.appearance-mini-preview { display: flex; width: 76px; height: 62px; flex: 0 0 76px; overflow: hidden; border: 1px solid var(--preview-line); border-radius: var(--preview-radius); background: var(--preview-bg); }
+.appearance-mini-rail { width: 18px; background: var(--preview-rail); }
+.appearance-mini-content { display: flex; flex: 1; flex-direction: column; gap: 6px; padding: 10px 8px; }
+.appearance-mini-line { display: block; width: 62%; height: 4px; border-radius: 99px; background: var(--preview-muted); }
+.appearance-mini-line.wide { width: 88%; background: var(--preview-text); }
+.appearance-mini-bubble { display: block; width: 70%; height: 13px; margin-top: auto; margin-left: auto; border-radius: var(--preview-radius); background: var(--preview-accent); }
+[data-preview-theme='sage'] { --preview-bg:#f4f6f4; --preview-rail:#25312a; --preview-line:#d8dfd9; --preview-text:#1f2922; --preview-muted:#919b94; --preview-accent:#27845a; --preview-radius:7px; }
+[data-preview-theme='forge'] { --preview-bg:#f6f8fa; --preview-rail:#24292f; --preview-line:#d1d9e0; --preview-text:#1f2328; --preview-muted:#818b98; --preview-accent:#1f883d; --preview-radius:3px; }
+[data-preview-theme='fox'] { --preview-bg:#f7f7fb; --preview-rail:#2b153f; --preview-line:#d8d4e4; --preview-text:#1d1133; --preview-muted:#8b8297; --preview-accent:#7542e5; --preview-radius:9px; }
+[data-preview-theme='ink'] { --preview-bg:#f1f0eb; --preview-rail:#fffefa; --preview-line:#191918; --preview-text:#111110; --preview-muted:#777770; --preview-accent:#111110; --preview-radius:6px; }
+[data-preview-theme='nord'] { --preview-bg:#e9eef2; --preview-rail:#1e2d37; --preview-line:#b9c7d0; --preview-text:#192832; --preview-muted:#7d909b; --preview-accent:#2e6f9e; --preview-radius:2px; }
+[data-preview-theme='wetalk'] { --preview-bg:#ededed; --preview-rail:#2e2e2e; --preview-line:#d4d4d4; --preview-text:#191919; --preview-muted:#9b9b9b; --preview-accent:#07c160; --preview-radius:4px; }
+
+@media (min-width: 800px) {
+  .appearance-scroll { padding: 32px; }
+}

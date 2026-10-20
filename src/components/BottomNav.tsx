@@ -1,0 +1,105 @@
+import { useMemo } from 'react'
+import { NavLink } from 'react-router-dom'
+import { useLiveQuery } from 'dexie-react-hooks'
+import { db } from '../db/db'
+import { UnreadBadge } from './UnreadBadge'
+import { useTotalUnread } from '../lib/unread'
+import { momentsUnreadCount } from '../lib/momentsUnread'
+import { useSettingsStore } from '../store/useSettingsStore'
+
+const TABS = [
+  { to: '/', label: '消息', icon: MessageIcon },
+  { to: '/contacts', label: '联系人', icon: ContactIcon },
+  { to: '/discover', label: '发现', icon: DiscoverIcon },
+  { to: '/me', label: '我', icon: MeIcon },
+]
+
+const EMPTY_ARRAY: never[] = []
+
+export function BottomNav() {
+  const moments = useLiveQuery(() => db.moments.toArray(), []) ?? EMPTY_ARRAY
+  const socialEvents = useLiveQuery(() => db.socialEvents.toArray(), []) ?? EMPTY_ARRAY
+  const momentsLastReadAt = useSettingsStore((s) => s.momentsLastReadAt)
+
+  const totalUnread = useTotalUnread()
+  const momentsUnread = useMemo(
+    () => momentsUnreadCount({ lastReadAt: momentsLastReadAt, moments, socialEvents }),
+    [momentsLastReadAt, moments, socialEvents],
+  )
+
+  return (
+    <nav className="flex shrink-0 border-t border-gray-100 bg-white pb-[env(safe-area-inset-bottom)]">
+      {TABS.map(({ to, label, icon: Icon }) => (
+        <NavLink
+          key={to}
+          to={to}
+          end={to === '/'}
+          className={({ isActive }) =>
+            `flex flex-1 flex-col items-center gap-0.5 py-2 text-[11px] ${
+              isActive ? 'text-gray-900' : 'text-gray-400'
+            }`
+          }
+        >
+          <div className="relative">
+            <Icon />
+            {to === '/' && <UnreadBadge count={totalUnread} className="absolute -top-1 -right-2" />}
+            {to === '/discover' && <UnreadBadge count={momentsUnread} className="absolute -top-1 -right-2" />}
+          </div>
+          <span>{label}</span>
+        </NavLink>
+      ))}
+    </nav>
+  )
+}
+
+function MessageIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+      <path
+        d="M4 5h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H9l-4.4 3.3A.6.6 0 0 1 3 19.8V6a1 1 0 0 1 1-1Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+function ContactIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="8" r="3.2" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M5 19c1.2-3.2 3.8-5 7-5s5.8 1.8 7 5"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+function DiscoverIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="12" r="8.5" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M15 9l-2 5-4 1.5L11 10l4-1Z"
+        stroke="currentColor"
+        strokeWidth="1.3"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+function MeIcon() {
+  return (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+      <circle cx="12" cy="8" r="3.6" stroke="currentColor" strokeWidth="1.7" />
+      <path
+        d="M4.5 20c1.4-4 4.3-6.2 7.5-6.2s6.1 2.2 7.5 6.2"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
