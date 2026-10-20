@@ -41,6 +41,9 @@ const loadOtherInterfacesPage = () => import('./pages/OtherInterfacesPage')
 const ChatPage = lazy(() => loadChatPage().then((m) => ({ default: m.ChatPage })))
 const ContactCardPage = lazy(() => loadContactCardPage().then((m) => ({ default: m.ContactCardPage })))
 const ContactGroupsPage = lazy(() => import('./pages/ContactGroupsPage').then((m) => ({ default: m.ContactGroupsPage })))
+const ContactPrivatePromptPage = lazy(() => import('./pages/ContactPrivatePromptPage').then((m) => ({ default: m.ContactPrivatePromptPage })))
+const ConversationAiTracePage = lazy(() => import('./pages/ConversationAiTracePage').then((m) => ({ default: m.ConversationAiTracePage })))
+const AiRequestsPage = lazy(() => import('./pages/AiRequestsPage').then((m) => ({ default: m.AiRequestsPage })))
 const ContactAdminPage = lazy(() => import('./pages/ContactAdminPage').then((m) => ({ default: m.ContactAdminPage })))
 const ContactAddPage = lazy(() => loadContactAddPage().then((m) => ({ default: m.ContactAddPage })))
 const ContactGenerationTaskPage = lazy(() => import('./pages/ContactGenerationTaskPage').then((m) => ({ default: m.ContactGenerationTaskPage })))
@@ -107,9 +110,15 @@ function useAutonomousBehaviorTimer() {
     if (!enabled) return
     const tick = () => {
       const settings = useSettingsStore.getState()
-      refreshMoments(settings).catch(() => {})
+      const now = Date.now()
+      const momentsInterval = Math.max(10 * 60 * 1000, settings.momentsRefreshIntervalMs || 3 * 60 * 60 * 1000)
+      if (!settings.momentsLastAutoRefreshAt || now - settings.momentsLastAutoRefreshAt >= momentsInterval) {
+        useSettingsStore.getState().setSettings({ momentsLastAutoRefreshAt: now })
+        refreshMoments(settings).catch(() => {})
+      }
       maybeTriggerProactiveMessage(settings).catch(() => {})
     }
+    tick()
     const id = setInterval(tick, intervalMs)
     return () => clearInterval(id)
   }, [enabled, intervalMs])
@@ -292,10 +301,13 @@ function App() {
           <Route path="/me" element={<MePage />} />
         </Route>
         <Route path="/chat/:conversationId" element={<ChatPage />} />
+        <Route path="/chat/:conversationId/ai-trace" element={<ConversationAiTracePage />} />
+        <Route path="/ai-requests" element={<AiRequestsPage />} />
         <Route path="/contact/new" element={<ContactAddPage />} />
         <Route path="/contact-groups" element={<ContactGroupsPage />} />
         <Route path="/contact-generation/:taskId" element={<ContactGenerationTaskPage />} />
         <Route path="/contact/:contactId" element={<ContactCardPage />} />
+        <Route path="/contact/:contactId/prompts" element={<ContactPrivatePromptPage />} />
         <Route path="/group/new" element={<GroupAddPage />} />
         <Route path="/group/:groupId" element={<GroupInfoPage />} />
         <Route path="/moments" element={<MomentsPage />} />

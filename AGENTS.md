@@ -362,13 +362,17 @@ v1做过一套完整的地图+日程+一次性任务系统，后来**用户明�
 - **备份**：`BACKUP_TABLES` 和 `BACKUP_SCHEMA_VERSION`（现在 12）已包含这些新表；旧备份缺少新表时按空表恢复。
 - **测试**：`src/lib/assistant.test.ts` 覆盖时间解析、跨夜覆盖、提醒窗口、已发送去重和提示词占位符；Playwright 可种一条 `personalScheduleItems` + 一条 `assistantDiaries`，并用 `page.route('**/chat/completions')` 模拟模型返回，验证日记 prompt 同时带上日程和聊天。
 
-## 二次开发增强（DB v48 / settings v33，新增）
+## 二次开发增强（DB v48 / settings v36，新增）
 - **联系人分组**：`contactGroups` 表（`id/name/contactIds[]`），页面 `/contact-groups`；`ContactsPage` 顶部分组 chip 过滤，多人可同时在多个分组。
 - **发送图片**：`chatEngine.sendImageMessage` 与 `groupChatEngine.sendGroupImageMessage` 把相册/拍照选择压缩成 data URL 后以 `type:'image'` 用户消息入库；相册扫描消息图片，来源标记为“聊天图片”；相册删除仍走 `hiddenAlbumUrls`（只从相册隐藏，不删聊天原文）。
 - **聊天多选删除**：复用 `ChatPage` 已有的消息选择模式（顶部“选择”），选择栏新增“删除”，事务里同时清理 `messages`、`speechCache` 和图片对应的 `mediaAssets`，并回写会话 `updatedAt`；删除后自动退出选择模式。
 - **任命小助理的感想**：`assistant.ts` 的 `appointAssistant()` 在设置成功后调用 `triggerAiTurn`（上下文【本轮类型：被任命为小助理】）；没有 API Key 时写入一条兜底感想。是否发送由 `settings.assistantReactionEnabled` 控制（默认开），「我的日程」和「小助理日记」的小助理区块都有同一个开关；关闭后只任命、不发消息。
+- **记忆/朋友圈节奏可调**：`settings.memoryUpdateInterval`（默认 10 条新消息，5–100，`memory.ts` 的私聊和群聊都读它）、`momentsCooldownMs`（单人发圈冷却，默认 3h）、`momentsRefreshIntervalMs`（自动刷新间隔，默认 3h）、`momentsLastAutoRefreshAt`（App 定时器节流）。手动刷新朋友圈仍会强制生成并重置自动刷新时间。UI 在「AI 自主行为 → 自主行为设置」和「AI 高级选项」。
+- **主动私聊提示词**：`lib/proactiveDefaults.ts` + `lib/proactiveChat.ts`。用户可关闭六类素材来源（事件/记忆/约定/日程/职业/日常），编辑带 `{{topic}}/{{source}}/{{recentTopics}}/{{contactName}}/{{userName}}/{{time}}` 的上下文模板，以及只对主动消息生效的额外要求（默认提醒不要每次都问“在干嘛”）。`buildProactiveContext()` 是纯函数并有单测；模板里去掉 `{{topic}}` 时仍会补一行素材兜底。入口在「AI 自主行为 → 自主行为设置」。
+- **AI 请求记录**：`/ai-requests` 全局页（可按主动私聊/对话回复筛选、按联系人搜索）和 `/chat/:conversationId/ai-trace` 单会话页，复用 `components/AiTraceView.tsx` 展示 `adminAiTraces` 里每次调用的完整 `messages`、输出、token 和耗时；主动私聊请求带「主动私聊」标记。聊天页桌面工具栏和手机「+」菜单有入口；`adminAiTraces` 只保留最近 500 条。
+- **私聊回复提示词结构**：`/contact/:contactId/prompts`（联系人名片「私聊回复提示词」进入）按顺序展示人物设定/关系/情境/记忆/世界书/可编辑模块/固定协议，展示最近一次非主动请求的 system 消息，并可编辑该联系人的 `promptModulesSnapshot`（chat/relationship/memory/worldview 的开关与模板，保存为独立快照）；页面会引导去「主动私聊提示词」。
 - **结构化日记**：`AssistantDiary.sections` 固定七栏（今日事件/今日情绪/今日成长/做的不错/可以调整的地方/明日最小行动/小助理碎碎念），`userReflection` 独立保存；生成时用 `jsonMode` + 固定 JSON schema，解析失败回退为“今日事件”；旧版 `content` 日记仍按今日事件显示。导出 `lib/diaryExport.ts`：Android 走 `BackupDirectory.stage/saveStaged` 系统保存选择器，Chromium 走 `showSaveFilePicker`，其余回退下载；支持单日与全部 Markdown 导出。
 - **特殊节日**：`specialDays`（`repeatYearly` 按月日匹配）+ `holidayGreetingLogs` 幂等表；日历日期下方直接显示节日名（多个用“·”连接，过长截断），当天详情显示完整名称；新增/删除在日记页“特殊节日”区块；`runAssistantSchedule()` 在 09:00 后、非免打扰时段，按 `holidayGreetingMaxContacts` 随机挑联系人调用 `triggerAiTurn`，由既有聊天工具决定是否附带红包/转账/礼物；`holidayGreetingEnabled` 可关闭。
 - **记忆先确认**：`memoryProposals` 表；`maybeUpdateMemory` 不再直接写 `Contact`，而是把 facts/style/plans/结构化记忆/关系变化暂存为 proposal，联系人页出现“待确认的记忆更新”卡片，可编辑 facts/style、修改/删除约定和记忆条目，确认后才写入并推进 `memoryMessageCursor`；放弃只推进游标、保留旧记忆。**注意：群聊的 `maybeUpdateGroupMemory` 仍按原逻辑直接写入，尚未接入 proposal。**
-- **数据/备份**：DB v48 新增上述四张表；`BACKUP_SCHEMA_VERSION` 12，旧备份缺表按空表恢复。设置新增 `holidayGreetingEnabled/holidayGreetingMaxContacts`（v33 迁移）。
-- **测试**：`assistant.test.ts` 增加结构化日记与节日匹配；Playwright 覆盖分组多选、任命感想、图片发送/相册删除、日记七栏+感想+导出入口、节日日历、记忆 proposal 确认/放弃。
+- **数据/备份**：DB v48 新增上述四张表；`BACKUP_SCHEMA_VERSION` 12，旧备份缺表按空表恢复。设置迁移到 v36（节日问候、记忆/朋友圈节奏、主动私聊提示词与素材来源）。
+- **测试**：`assistant.test.ts` 增加结构化日记与节日匹配；`proactiveChat.test.ts` 覆盖主动上下文占位符/素材兜底；Playwright 覆盖分组多选、任命感想、图片发送/相册删除、日记七栏+感想+导出入口、节日日历、记忆 proposal 确认/放弃、记忆/朋友圈节奏、主动提示词与 AI 请求筛选。

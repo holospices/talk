@@ -1099,6 +1099,27 @@ export interface AppSettings {
   proactiveCooldownMs: number // a contact won't proactively message again until this long has passed since their last one
   proactiveMomentsMax: number // max moments to auto-post per background tick (default 3)
   proactiveTickIntervalMs: number // how often the background timer fires (default 5 min)
+  /** How many new messages accumulate before the memory summarizer proposes an update (default 10). */
+  memoryUpdateInterval: number
+  /** Minimum gap between two Moments posts by the same contact (default 3 hours). */
+  momentsCooldownMs: number
+  /** Minimum gap between two automatic Moments refreshes (default 3 hours). */
+  momentsRefreshIntervalMs: number
+  /** Timestamp of the last automatic Moments refresh; throttles the foreground tick. */
+  momentsLastAutoRefreshAt: number
+  /** User-editable context template for AI-initiated private messages. */
+  proactiveContextPrompt: string
+  /** Extra voice/behavior instructions appended only to proactive messages. */
+  proactiveExtraInstruction: string
+  /** Which topic sources may seed an AI-initiated private message. */
+  proactiveTopicSources: {
+    events: boolean
+    memories: boolean
+    plans: boolean
+    schedule: boolean
+    career: boolean
+    casual: boolean
+  }
   /** 0 = unlimited. Only automatic/background AI work counts against this daily cap. */
   automaticAiDailyCap: number
   // ---- personal schedule + small assistant (see lib/assistant.ts) ----

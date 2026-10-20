@@ -5,7 +5,8 @@ import { weightedSampleWithoutReplacement } from './groupChat'
 import { describeCurrentSchedule, isPhoneAvailable } from './schedule'
 import { getPersonalSchedule, isUserInDndNow } from './assistant'
 import { useSettingsStore } from '../store/useSettingsStore'
-import { toDateKey } from './time'
+import { describeCurrentTime, toDateKey } from './time'
+import { DEFAULT_PROACTIVE_CONTEXT_PROMPT, DEFAULT_PROACTIVE_TOPIC_SOURCES } from './proactiveDefaults'
 import type { AppSettings, Contact, ProactiveTopicRecord } from '../types'
 
 export const AUTONOMOUS_TICK_INTERVAL_MS = 5 * 60 * 1000
@@ -22,22 +23,54 @@ function recordSent() {
   setSettings({ proactiveMessageLog: { date, count: proactiveMessageLog?.date === date ? proactiveMessageLog.count + 1 : 1 } })
 }
 
-async function chooseTopic(contact: Contact): Promise<ProactiveTopicRecord | undefined> {
+async function chooseTopic(contact: Contact, settings: AppSettings): Promise<ProactiveTopicRecord | undefined> {
+  const sources = settings.proactiveTopicSources ?? DEFAULT_PROACTIVE_TOPIC_SOURCES
   const used = new Set((contact.proactiveTopicHistory ?? []).filter((x) => Date.now() - x.createdAt < 7 * 86400000).map((x) => x.topic))
   const candidates: Omit<ProactiveTopicRecord, 'createdAt'>[] = []
-  for (const event of contact.pendingEvents ?? []) candidates.push({ topic: event, source: 'event' })
-  const memories = await db.contactMemories.where('contactId').equals(contact.id).reverse().sortBy('createdAt')
-  for (const memory of memories.slice(0, 20)) {
-    if (memory.kind === 'open_thread') candidates.push({ topic: memory.content, source: 'open_thread' })
-    else if (memory.importance >= 0.65) candidates.push({ topic: memory.content, source: 'memory' })
+  if (sources.events) for (const event of contact.pendingEvents ?? []) candidates.push({ topic: event, source: 'event' })
+  if (sources.memories) {
+    const memories = await db.contactMemories.where('contactId').equals(contact.id).reverse().sortBy('createdAt')
+    for (const memory of memories.slice(0, 20)) {
+      if (memory.kind === 'open_thread') candidates.push({ topic: memory.content, source: 'open_thread' })
+      else if (memory.importance >= 0.65) candidates.push({ topic: memory.content, source: 'memory' })
+    }
   }
-  for (const plan of contact.upcomingPlans ?? []) candidates.push({ topic: plan.text, source: 'plan' })
-  const schedule = describeCurrentSchedule(contact, new Date())
-  if (schedule) candidates.push({ topic: schedule, source: 'schedule' })
-  if (contact.occupation) candidates.push({ topic: `${contact.occupation}相关的真实日常`, source: 'career' })
-  candidates.push({ topic: '结合当前时间和自己的生活状态，发一句符合性格的轻量日常消息', source: 'casual' })
+  if (sources.plans) for (const plan of contact.upcomingPlans ?? []) candidates.push({ topic: plan.text, source: 'plan' })
+  if (sources.schedule) {
+    const schedule = describeCurrentSchedule(contact, new Date())
+    if (schedule) candidates.push({ topic: schedule, source: 'schedule' })
+  }
+  if (sources.career && contact.occupation) candidates.push({ topic: `${contact.occupation}相关的真实日常`, source: 'career' })
+  if (sources.casual) candidates.push({ topic: '结合当前时间和自己的生活状态，发一句符合性格的轻量日常消息', source: 'casual' })
   const chosen = candidates.find((item) => !used.has(item.topic))
   return chosen ? { ...chosen, createdAt: Date.now() } : undefined
+}
+
+function fillProactiveTemplate(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{\{\s*(\w+)\s*\}\}/g, (_match, key: string) => vars[key] ?? '')
+}
+
+export function buildProactiveContext(
+  contact: Contact,
+  topic: ProactiveTopicRecord,
+  settings: Pick<AppSettings, 'proactiveContextPrompt' | 'proactiveExtraInstruction' | 'userNickname'>,
+  now = Date.now(),
+): string {
+  const recentTopics = (contact.proactiveTopicHistory ?? []).slice(-4).map((x) => x.topic).join('；') || '无'
+  const template = settings.proactiveContextPrompt?.trim() || DEFAULT_PROACTIVE_CONTEXT_PROMPT
+  const vars = {
+    topic: topic.topic,
+    source: topic.source,
+    recentTopics,
+    contactName: contact.name,
+    userName: settings.userNickname || '我',
+    time: describeCurrentTime(new Date(now)),
+  }
+  let context = fillProactiveTemplate(template, vars)
+  // Keep the chosen material visible even if the user edits the placeholder away.
+  if (!template.includes('{{topic}}')) context += `\n（本轮素材：${topic.topic}；来源：${topic.source}）`
+  if (settings.proactiveExtraInstruction?.trim()) context += `\n\n${settings.proactiveExtraInstruction.trim()}`
+  return context
 }
 
 export async function maybeTriggerProactiveMessage(settings: AppSettings): Promise<void> {
@@ -56,10 +89,10 @@ export async function maybeTriggerProactiveMessage(settings: AppSettings): Promi
     })
     const [contact] = weightedSampleWithoutReplacement(eligible, 1)
     if (!contact) return
-    const topic = await chooseTopic(contact)
+    const topic = await chooseTopic(contact, settings)
     const conv = byContact.get(contact.id)
     if (!topic || !conv) return
-    const context = `【本轮类型：主动开启对话】\n自然切入这个素材：${topic.topic}\n来源：${topic.source}。用户此刻没有发新消息，不要写成回复口吻，不要说“你刚才”。不要编造素材之外的突发事件、共同经历或线下见面。开场服从你的人设、关系和当前时间，通常一两条短消息即可。如果这个素材不足以形成自然开场，只输出空回复。最近主动聊过：${(contact.proactiveTopicHistory ?? []).slice(-4).map((x) => x.topic).join('；') || '无'}。`
+    const context = buildProactiveContext(contact, topic, settings, now)
     const before = await db.aiTurns.where('conversationId').equals(conv.id).count()
     await triggerAiTurn(conv.id, contact, settings, await db.stickers.toArray(), context)
     const after = await db.aiTurns.where('conversationId').equals(conv.id).count()

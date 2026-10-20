@@ -150,6 +150,7 @@ export function MomentsPage() {
     setMessage('')
     try {
       const result = await refreshMoments(settings, { forceNew: true })
+      useSettingsStore.getState().setSettings({ momentsLastAutoRefreshAt: Date.now() })
       setMessage(result.message ?? (result.postedCount > 0 ? `刷出了${result.postedCount}条新动态` : ''))
     } catch (err) {
       setMessage(err instanceof Error ? err.message : String(err))

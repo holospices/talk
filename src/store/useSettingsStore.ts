@@ -21,6 +21,11 @@ import {
   DEFAULT_ASSISTANT_DIARY_PROMPT,
   DEFAULT_ASSISTANT_REMINDER_PROMPT,
 } from '../lib/assistantDefaults'
+import {
+  DEFAULT_PROACTIVE_CONTEXT_PROMPT,
+  DEFAULT_PROACTIVE_EXTRA_INSTRUCTION,
+  DEFAULT_PROACTIVE_TOPIC_SOURCES,
+} from '../lib/proactiveDefaults'
 
 interface SettingsState extends AppSettings {
   setSettings: (patch: Partial<AppSettings>) => void
@@ -81,6 +86,13 @@ export const useSettingsStore = create<SettingsState>()(
       proactiveCooldownMs: 6 * 60 * 60 * 1000,
       proactiveMomentsMax: 3,
       proactiveTickIntervalMs: 5 * 60 * 1000,
+      memoryUpdateInterval: 10,
+      momentsCooldownMs: 3 * 60 * 60 * 1000,
+      momentsRefreshIntervalMs: 3 * 60 * 60 * 1000,
+      momentsLastAutoRefreshAt: 0,
+      proactiveContextPrompt: DEFAULT_PROACTIVE_CONTEXT_PROMPT,
+      proactiveExtraInstruction: DEFAULT_PROACTIVE_EXTRA_INSTRUCTION,
+      proactiveTopicSources: { ...DEFAULT_PROACTIVE_TOPIC_SOURCES },
       automaticAiDailyCap: 0,
       assistantContactId: '',
       assistantSince: 0,
@@ -145,7 +157,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'talk-settings',
-      version: 34,
+      version: 36,
       migrate: (persisted, version) => {
         const next = persisted as Partial<SettingsState>
         if (next.experienceMode !== 'immersive' && next.experienceMode !== 'free') next.experienceMode = 'free'
@@ -175,6 +187,33 @@ export const useSettingsStore = create<SettingsState>()(
           if (hadWorldFeature && !next.enabledModules.includes('saveLoad')) next.enabledModules.push('saveLoad')
         }
         if (typeof next.automaticAiDailyCap !== 'number') next.automaticAiDailyCap = 0
+        if (typeof next.memoryUpdateInterval !== 'number' || !Number.isFinite(next.memoryUpdateInterval)) {
+          next.memoryUpdateInterval = 10
+        } else {
+          next.memoryUpdateInterval = Math.max(5, Math.min(100, Math.round(next.memoryUpdateInterval)))
+        }
+        if (typeof next.momentsCooldownMs !== 'number' || !Number.isFinite(next.momentsCooldownMs)) {
+          next.momentsCooldownMs = 3 * 60 * 60 * 1000
+        } else {
+          next.momentsCooldownMs = Math.max(30 * 60 * 1000, Math.min(24 * 60 * 60 * 1000, Math.round(next.momentsCooldownMs)))
+        }
+        if (typeof next.momentsRefreshIntervalMs !== 'number' || !Number.isFinite(next.momentsRefreshIntervalMs)) {
+          next.momentsRefreshIntervalMs = 3 * 60 * 60 * 1000
+        } else {
+          next.momentsRefreshIntervalMs = Math.max(10 * 60 * 1000, Math.min(24 * 60 * 60 * 1000, Math.round(next.momentsRefreshIntervalMs)))
+        }
+        if (typeof next.momentsLastAutoRefreshAt !== 'number' || !Number.isFinite(next.momentsLastAutoRefreshAt)) next.momentsLastAutoRefreshAt = 0
+        if (typeof next.proactiveContextPrompt !== 'string') next.proactiveContextPrompt = DEFAULT_PROACTIVE_CONTEXT_PROMPT
+        if (typeof next.proactiveExtraInstruction !== 'string') next.proactiveExtraInstruction = DEFAULT_PROACTIVE_EXTRA_INSTRUCTION
+        const legacySources = next.proactiveTopicSources as Partial<Record<keyof typeof DEFAULT_PROACTIVE_TOPIC_SOURCES, unknown>> | undefined
+        next.proactiveTopicSources = {
+          events: typeof legacySources?.events === 'boolean' ? legacySources.events : DEFAULT_PROACTIVE_TOPIC_SOURCES.events,
+          memories: typeof legacySources?.memories === 'boolean' ? legacySources.memories : DEFAULT_PROACTIVE_TOPIC_SOURCES.memories,
+          plans: typeof legacySources?.plans === 'boolean' ? legacySources.plans : DEFAULT_PROACTIVE_TOPIC_SOURCES.plans,
+          schedule: typeof legacySources?.schedule === 'boolean' ? legacySources.schedule : DEFAULT_PROACTIVE_TOPIC_SOURCES.schedule,
+          career: typeof legacySources?.career === 'boolean' ? legacySources.career : DEFAULT_PROACTIVE_TOPIC_SOURCES.career,
+          casual: typeof legacySources?.casual === 'boolean' ? legacySources.casual : DEFAULT_PROACTIVE_TOPIC_SOURCES.casual,
+        }
         if (typeof next.assistantContactId !== 'string') next.assistantContactId = ''
         if (typeof next.assistantSince !== 'number' || !Number.isFinite(next.assistantSince)) next.assistantSince = 0
         if (typeof next.assistantReminderPrompt !== 'string') next.assistantReminderPrompt = DEFAULT_ASSISTANT_REMINDER_PROMPT

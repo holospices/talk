@@ -18,6 +18,14 @@ export const CONTEXT_WINDOW_SIZE = 30
 /** Bounds how many upcoming plans a contact can accumulate. */
 const MAX_UPCOMING_PLANS = 8
 const MEMORY_CONFIDENCE_THRESHOLD = 60
+
+/** User-configurable cadence; falls back to the historical default. */
+export function memoryUpdateIntervalFor(settings: Pick<AppSettings, 'memoryUpdateInterval'>): number {
+  const value = settings.memoryUpdateInterval
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.max(5, Math.min(100, Math.round(value)))
+    : MEMORY_UPDATE_INTERVAL
+}
 const RELATIONSHIP_CONFIDENCE_THRESHOLD = 80
 
 export function activeUpcomingPlans(plans: PlanItem[], now: Date): PlanItem[] {
@@ -430,7 +438,7 @@ export async function maybeUpdateMemory(
       .filter((message) => message.image?.presentation !== 'illustration')
     const cursor = contact.memoryMessageCursor ?? 0
     const newMessages = allMessages.slice(cursor)
-    if (newMessages.length < MEMORY_UPDATE_INTERVAL) return null
+    if (newMessages.length < memoryUpdateIntervalFor(settings)) return null
     // A pending proposal blocks further summaries: the user still hasn't
     // accepted the last batch, so re-running would create duplicate cards.
     const pending = await db.memoryProposals.where('contactId').equals(contact.id).filter((proposal) => proposal.status === 'pending').first()
@@ -894,7 +902,7 @@ export async function maybeUpdateGroupMemory(
       .filter((message) => message.image?.presentation !== 'illustration')
     const cursor = group.memoryMessageCursor ?? 0
     const newMessages = allMessages.slice(cursor)
-    if (newMessages.length < MEMORY_UPDATE_INTERVAL) return
+    if (newMessages.length < memoryUpdateIntervalFor(settings)) return
 
     const memberById = new Map(members.map((c) => [c.id, c]))
     const speakerIds = Array.from(

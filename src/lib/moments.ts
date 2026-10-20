@@ -71,17 +71,29 @@ function shuffle<T>(arr: T[]): T[] {
   return copy
 }
 
-export function eligiblePosters(contacts: Contact[], now: number): Contact[] {
+export function eligiblePosters(contacts: Contact[], now: number, cooldownMs = MOMENT_COOLDOWN_MS): Contact[] {
   const nowDate = new Date(now)
   return contacts.filter(
-    (c) => (!c.lastMomentAt || now - c.lastMomentAt > MOMENT_COOLDOWN_MS) && isPhoneAvailable(c, nowDate),
+    (c) => (!c.lastMomentAt || now - c.lastMomentAt > cooldownMs) && isPhoneAvailable(c, nowDate),
   )
 }
 
-export function eligiblePostersForRefresh(contacts: Contact[], now: number, forceNew = false): Contact[] {
-  if (!forceNew) return eligiblePosters(contacts, now)
+export function eligiblePostersForRefresh(
+  contacts: Contact[],
+  now: number,
+  forceNew = false,
+  cooldownMs = MOMENT_COOLDOWN_MS,
+): Contact[] {
+  if (!forceNew) return eligiblePosters(contacts, now, cooldownMs)
   const available = contacts.filter((contact) => isPhoneAvailable(contact, new Date(now)))
   return available.length > 0 ? available : contacts
+}
+
+function momentsCooldownFor(settings: Pick<AppSettings, 'momentsCooldownMs'>): number {
+  const value = settings.momentsCooldownMs
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.max(30 * 60 * 1000, Math.min(24 * 60 * 60 * 1000, Math.round(value)))
+    : MOMENT_COOLDOWN_MS
 }
 
 function normalizeMomentText(value: string): string {
@@ -414,7 +426,7 @@ export async function refreshMoments(settings: AppSettings, options: RefreshMome
   // Manual refresh bypasses the three-hour cooldown. Prefer characters who
   // can currently use their phone; only fall back to the whole cast when that
   // is necessary to honor the explicit "refresh means new content" action.
-  const eligible = eligiblePostersForRefresh(contacts, now, options.forceNew)
+  const eligible = eligiblePostersForRefresh(contacts, now, options.forceNew, momentsCooldownFor(settings))
   if (eligible.length === 0) return { postedCount: 0, message: '大家都刚发过 稍后再刷新试试' }
 
   const count = pickPosterCount(eligible.length, contacts.length, Math.max(1, settings.proactiveMomentsMax))
