@@ -88,6 +88,8 @@ export const useSettingsStore = create<SettingsState>()(
       assistantReminderPrompt: DEFAULT_ASSISTANT_REMINDER_PROMPT,
       assistantDiaryPrompt: DEFAULT_ASSISTANT_DIARY_PROMPT,
       assistantChangePromptDate: '',
+      holidayGreetingEnabled: true,
+      holidayGreetingMaxContacts: 3,
       tavilyApiKey: envTavilyKey,
       worldview: '',
       worldbookMigrationCompleted: false,
@@ -142,7 +144,7 @@ export const useSettingsStore = create<SettingsState>()(
     }),
     {
       name: 'talk-settings',
-      version: 32,
+      version: 33,
       migrate: (persisted, version) => {
         const next = persisted as Partial<SettingsState>
         if (next.experienceMode !== 'immersive' && next.experienceMode !== 'free') next.experienceMode = 'free'
@@ -184,6 +186,12 @@ export const useSettingsStore = create<SettingsState>()(
         }
         if (version < 32 && Array.isArray(next.enabledModules) && !next.enabledModules.includes('assistantSchedule')) {
           next.enabledModules = [...next.enabledModules, 'assistantSchedule']
+        }
+        if (typeof next.holidayGreetingEnabled !== 'boolean') next.holidayGreetingEnabled = true
+        if (typeof next.holidayGreetingMaxContacts !== 'number' || !Number.isFinite(next.holidayGreetingMaxContacts)) {
+          next.holidayGreetingMaxContacts = 3
+        } else {
+          next.holidayGreetingMaxContacts = Math.max(1, Math.min(10, Math.round(next.holidayGreetingMaxContacts)))
         }
         if (typeof next.userVisualIdentity !== 'string') next.userVisualIdentity = ''
         if (typeof next.userVisualSeed !== 'number') next.userVisualSeed = undefined

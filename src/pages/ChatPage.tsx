@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
 import Dexie from 'dexie'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
@@ -11,8 +11,9 @@ import { ActionSheet } from '../components/ActionSheet'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { useModuleEnabled } from '../features'
 import { useChatUiStore } from '../store/useChatUiStore'
-import { DEFAULT_RUNTIME_STATE, nextMessageTimestamp, regenerateAiTurn, sendMessage, stopAiTurn, triggerAiTurn, useChatEngineStore } from '../lib/chatEngine'
-import { regenerateGroupAiTurn, sendGroupMessage, stopGroupAiTurn, triggerGroupAiTurn } from '../lib/groupChatEngine'
+import { DEFAULT_RUNTIME_STATE, nextMessageTimestamp, regenerateAiTurn, sendImageMessage, sendMessage, stopAiTurn, triggerAiTurn, useChatEngineStore } from '../lib/chatEngine'
+import { regenerateGroupAiTurn, sendGroupImageMessage, sendGroupMessage, stopGroupAiTurn, triggerGroupAiTurn } from '../lib/groupChatEngine'
+import { resizeImageDataUrl } from '../lib/image'
 import { displayName } from '../lib/contact'
 import { applyMessageFeedback } from '../lib/messageFeedback'
 import { buildPrivateStatusLine } from '../lib/contactStatus'
@@ -25,7 +26,7 @@ import { isStickerProviderReady, stickerProviderName } from '../lib/mediaProvide
 import { normalizeChatPageSize } from '../lib/chatPagination'
 import { resolveLocationParticipants, syncContactLocationsAt } from '../lib/locations'
 import { revertInternalTask } from '../lib/internalTasks'
-import { ArrowLeftRight, BriefcaseBusiness, CircleDollarSign, Gift, HandCoins, Package, Plus, ShoppingBag, Sticker as StickerIcon } from 'lucide-react'
+import { ArrowLeftRight, BriefcaseBusiness, CircleDollarSign, Gift, HandCoins, ImagePlus, Package, Plus, ShoppingBag, Sticker as StickerIcon } from 'lucide-react'
 import { UiIcon } from '../components/UiIcon'
 import { isAiTestId } from '../lib/aiTestIsolation'
 import { contactSpeechVoice, isSpeechProviderReady } from '../lib/speechProviders'
@@ -177,6 +178,7 @@ export function ChatPage() {
   const [captureImageUrl, setCaptureImageUrl] = useState('')
   const [captureBusy, setCaptureBusy] = useState(false)
   const [appsOpen, setAppsOpen] = useState(false)
+  const imageInputRef = useRef<HTMLInputElement | null>(null)
   const [stickerPickerOpen, setStickerPickerOpen] = useState(false)
   function openStickers() { setStickerPickerOpen(true); setStickerQuery(''); setStickerResults([]) }
   const [stickerQuery, setStickerQuery] = useState('')
@@ -352,6 +354,35 @@ export function ChatPage() {
     } catch (error) {
       useChatEngineStore.getState().patch(conversationId, { error: '消息未发送，输入已保留：' + (error instanceof Error ? error.message : String(error)) })
       return false
+    }
+  }
+
+  async function handleImagePicked(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0]
+    event.target.value = ''
+    if (!file || !conversationId) return
+    if (!file.type.startsWith('image/')) {
+      setToast('请选择图片文件')
+      return
+    }
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '')
+        reader.onerror = () => reject(new Error('读取图片失败'))
+        reader.readAsDataURL(file)
+      })
+      const resized = await resizeImageDataUrl(dataUrl, 1600)
+      const currentSettings = useSettingsStore.getState()
+      const sent = isGroupConv
+        ? !!group && await sendGroupImageMessage(conversationId, group, groupMembers, currentSettings, stickers, resized)
+        : !!contact && await sendImageMessage(conversationId, contact, currentSettings, stickers, resized)
+      if (sent) {
+        jumpToLatest()
+        setToast(isGroupConv ? '图片已发送' : settings.apiKey ? '图片已发送' : '图片已加入聊天和相册')
+      }
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : String(error))
     }
   }
 
@@ -957,6 +988,7 @@ export function ChatPage() {
               onStop={handleStopGeneration}
               tools={desktop ? <>
                 <button type="button" onClick={openStickers} aria-label="搜索表情包" title="表情包"><StickerIcon size={18} /></button>
+                <button type="button" onClick={() => imageInputRef.current?.click()} aria-label="发送图片" title="发送图片"><ImagePlus size={18} /></button>
                 {!isGroupConv && careerEnabled && <>
                   <span className="desktop-chat-tool-divider" />
                   <button type="button" onClick={() => setFinanceMode('transfer')} aria-label="转账" title="转账"><ArrowLeftRight size={18} /></button>
@@ -972,6 +1004,7 @@ export function ChatPage() {
                 <button type="button" onClick={openStickers} aria-label="搜索表情包" className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gray-100 text-gray-600"><StickerIcon size={20} /></button>
               </>}
             />
+            <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={(event) => void handleImagePicked(event)} />
           </>
         )}
       </div>
@@ -1086,6 +1119,7 @@ export function ChatPage() {
       )}
       {appsOpen && (
         <ActionSheet onClose={()=>setAppsOpen(false)} options={[
+          {label:'发送图片',onSelect:()=>{setAppsOpen(false);imageInputRef.current?.click()}},
           {label:'搜索远程表情包',onSelect:()=>{setAppsOpen(false);setStickerPickerOpen(true);setStickerQuery('');setStickerResults([])}},
           ...(!isGroupConv&&careerEnabled?[{label:'转账',onSelect:()=>{setAppsOpen(false);setFinanceMode('transfer' as const)}},{label:'红包',onSelect:()=>{setAppsOpen(false);setFinanceMode('redPacket' as const)}},{label:'借款',onSelect:()=>{setAppsOpen(false);setFinanceMode('loan' as const)}},{label:'归还借款',onSelect:()=>{setAppsOpen(false);void repayLoan()}}]:[]),
           ...(careerEnabled?[{label:'工作',onSelect:()=>navigate('/work')}]:[]),

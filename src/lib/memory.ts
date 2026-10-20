@@ -6,7 +6,7 @@ import { clampWarmthDelta, applyWarmthDelta, warmthStage, shouldUpdateBase, cont
 import { displayName } from './contact'
 import { describeCurrentTime, toDateKey } from './time'
 import { applyInterpersonalMemorySignals, uniqueRelationPairs } from './contactRelations'
-import type { AppSettings, Contact, ContactMemory, ContactMemoryScope, ContactRelationLabel, MemoryCategory, MemoryKind, Message, PlanItem } from '../types'
+import type { AppSettings, Contact, ContactMemory, ContactMemoryScope, ContactRelationLabel, MemoryCategory, MemoryKind, MemoryProposal, Message, PlanItem } from '../types'
 import { featureActive, getPromptTemplate, promptModuleEnabled } from './promptModules'
 
 /** How many *new* messages accumulate before we bother refreshing memory. Keeps the extra API call rare. */
@@ -431,6 +431,10 @@ export async function maybeUpdateMemory(
     const cursor = contact.memoryMessageCursor ?? 0
     const newMessages = allMessages.slice(cursor)
     if (newMessages.length < MEMORY_UPDATE_INTERVAL) return null
+    // A pending proposal blocks further summaries: the user still hasn't
+    // accepted the last batch, so re-running would create duplicate cards.
+    const pending = await db.memoryProposals.where('contactId').equals(contact.id).filter((proposal) => proposal.status === 'pending').first()
+    if (pending) return null
     const memoryPromptEnabled = promptModuleEnabled(settings, 'memory')
     const relationshipPromptEnabled = featureActive(settings, 'relationship')
     if (!memoryPromptEnabled && !relationshipPromptEnabled) return null
@@ -494,18 +498,11 @@ export async function maybeUpdateMemory(
     const factsUpdated = memoryPromptEnabled && updated.factConfidence >= MEMORY_CONFIDENCE_THRESHOLD && updated.facts !== contact.memoryFacts
     const styleUpdated = memoryPromptEnabled && updated.styleConfidence >= MEMORY_CONFIDENCE_THRESHOLD && updated.style !== contact.memoryStyle
     const addedPlans = memoryPromptEnabled ? newPlanItems(updated.plans, now) : []
-
-    // Write structured memory items to the contactMemories table (deduped).
-    const memStats = memoryPromptEnabled
-      ? await mergeMemoryItems(contact.id, updated.memoryItems, conversationId, now)
-      : { added: 0, updated: 0 }
-    if (memStats.added > 0 || memStats.updated > 0) {
-      console.log(`[memory] 结构化记忆: +${memStats.added} 更新${memStats.updated}`)
-    }
+    const proposedMemoryItems = memoryPromptEnabled ? updated.memoryItems : []
 
     // character_promise items also feed into upcomingPlans so the AI
     // remembers its commitments across turns.
-    const promisePlans: PlanItem[] = (memoryPromptEnabled ? updated.memoryItems : [])
+    const promisePlans: PlanItem[] = proposedMemoryItems
       .filter((item) => item.kind === 'character_promise')
       .map((item) => ({
         id: uuid(),
@@ -515,21 +512,34 @@ export async function maybeUpdateMemory(
         confidence: Math.round(item.confidence * 100),
       }))
     const allAddedPlans = [...addedPlans, ...promisePlans]
+    const relationshipChanged = relEnabled && (warmthDelta !== 0 || relationshipBaseChanged || dynamic !== contact.relationshipDynamic)
+    const hasChanges = factsUpdated || styleUpdated || allAddedPlans.length > 0 || proposedMemoryItems.length > 0 || relationshipChanged
 
-    await db.contacts.update(contact.id, {
-      memoryMessageCursor: allMessages.length,
-      ...(memoryPromptEnabled ? {
-        memoryFacts: factsUpdated ? updated.facts : contact.memoryFacts,
-        memoryStyle: styleUpdated ? updated.style : contact.memoryStyle,
-        memoryUpdatedAt: now,
-        upcomingPlans: mergePlanItems(contact.upcomingPlans ?? [], allAddedPlans, now),
-      } : {}),
-      ...(relEnabled
-        ? { warmth: newWarmth, relationshipDynamic: dynamic, relationshipBase: base }
-        : {}),
-    })
+    if (!hasChanges) {
+      await db.contacts.update(contact.id, { memoryMessageCursor: allMessages.length })
+      return null
+    }
+
+    // Stage the changes. The contact keeps its old memory (and the chat keeps
+    // using it) until the user confirms this card on the contact page.
+    const proposal: MemoryProposal = {
+      id: uuid(),
+      contactId: contact.id,
+      conversationId,
+      createdAt: now,
+      messageCount: allMessages.length,
+      facts: factsUpdated ? updated.facts : contact.memoryFacts,
+      style: styleUpdated ? updated.style : contact.memoryStyle,
+      plans: allAddedPlans,
+      memoryItems: proposedMemoryItems,
+      warmth: newWarmth,
+      relationshipDynamic: dynamic,
+      relationshipBase: base,
+      status: 'pending',
+    }
+    await db.memoryProposals.add(proposal)
     return {
-      applied: true,
+      applied: false,
       factsUpdated,
       styleUpdated,
       addedPlans,
@@ -713,6 +723,59 @@ export async function resetMemory(contactId: string): Promise<void> {
     upcomingPlans: [],
   })
   await db.contactMemories.where('contactId').equals(contactId).delete()
+  await db.memoryProposals.where('contactId').equals(contactId).delete()
+}
+
+export async function getPendingMemoryProposal(contactId: string): Promise<MemoryProposal | undefined> {
+  return db.memoryProposals.where('contactId').equals(contactId).filter((proposal) => proposal.status === 'pending').first()
+}
+
+/**
+ * Apply the staged memory exactly as edited by the user. `patch` lets the
+ * contact card change facts/style, drop plans or drop individual structured
+ * memories before confirming.
+ */
+export async function confirmMemoryProposal(
+  proposalId: string,
+  patch: Partial<Pick<MemoryProposal, 'facts' | 'style' | 'plans' | 'memoryItems'>> = {},
+): Promise<void> {
+  const proposal = await db.memoryProposals.get(proposalId)
+  if (!proposal || proposal.status !== 'pending') return
+  const contact = await db.contacts.get(proposal.contactId)
+  if (!contact) {
+    await db.memoryProposals.update(proposalId, { status: 'discarded', resolvedAt: Date.now() })
+    return
+  }
+  const now = Date.now()
+  const facts = (patch.facts ?? proposal.facts).trim()
+  const style = (patch.style ?? proposal.style).trim()
+  const plans = patch.plans ?? proposal.plans
+  const memoryItems = patch.memoryItems ?? proposal.memoryItems
+  await db.contacts.update(contact.id, {
+    memoryFacts: facts,
+    memoryStyle: style,
+    memoryUpdatedAt: now,
+    memoryMessageCursor: Math.max(contact.memoryMessageCursor ?? 0, proposal.messageCount),
+    upcomingPlans: mergePlanItems(contact.upcomingPlans ?? [], plans, now),
+    warmth: proposal.warmth,
+    relationshipDynamic: proposal.relationshipDynamic,
+    relationshipBase: proposal.relationshipBase,
+  })
+  if (memoryItems.length > 0) {
+    await mergeMemoryItems(contact.id, memoryItems, proposal.conversationId, now)
+  }
+  await db.memoryProposals.update(proposalId, { status: 'confirmed', resolvedAt: now })
+}
+
+/** Keep the old memory, but advance the cursor so the same messages aren't re-summarized. */
+export async function discardMemoryProposal(proposalId: string): Promise<void> {
+  const proposal = await db.memoryProposals.get(proposalId)
+  if (!proposal || proposal.status !== 'pending') return
+  const contact = await db.contacts.get(proposal.contactId)
+  await db.contacts.update(proposal.contactId, {
+    memoryMessageCursor: Math.max(contact?.memoryMessageCursor ?? 0, proposal.messageCount),
+  })
+  await db.memoryProposals.update(proposalId, { status: 'discarded', resolvedAt: Date.now() })
 }
 
 // ---- group chat memory ----

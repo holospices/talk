@@ -23,6 +23,7 @@ import type {
   WalletAccount, WalletTransaction, Loan, JobListing, InterviewSession,
   LocationNode, WorldMapRecord, LocationModuleState, AcousticEdge, InternalTask, MediaAsset, WorldContactState,
   PersonalScheduleItem, AssistantDiary, AssistantReminderLog,
+  ContactGroup, SpecialDay, HolidayGreetingLog, MemoryProposal,
 } from '../types'
 import { compactLegacyPersonaText, removeRepeatedPersonaBiography } from '../lib/personaMigration'
 
@@ -79,6 +80,10 @@ export class TalkDB extends Dexie {
   personalScheduleItems!: Table<PersonalScheduleItem, string>
   assistantDiaries!: Table<AssistantDiary, string>
   assistantReminderLogs!: Table<AssistantReminderLog, string>
+  contactGroups!: Table<ContactGroup, string>
+  specialDays!: Table<SpecialDay, string>
+  holidayGreetingLogs!: Table<HolidayGreetingLog, string>
+  memoryProposals!: Table<MemoryProposal, string>
 
   constructor() {
     super('talk-db')
@@ -584,6 +589,14 @@ export class TalkDB extends Dexie {
       personalScheduleItems: 'id, startMinute, updatedAt',
       assistantDiaries: 'id, &date, assistantContactId, status, createdAt',
       assistantReminderLogs: 'id, date, itemId, sentAt',
+    })
+    // Contact groups, user-defined special days, holiday-greeting idempotency,
+    // and staged memory proposals that the user must confirm.
+    this.version(48).stores({
+      contactGroups: 'id, name, createdAt',
+      specialDays: 'id, date, name, createdAt',
+      holidayGreetingLogs: 'id, date, specialDayId, contactId, sentAt',
+      memoryProposals: 'id, contactId, status, createdAt',
     })
   }
 }

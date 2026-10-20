@@ -321,6 +321,48 @@ export async function sendMessage(
 }
 
 /**
+ * Sends a user-picked image into a 1:1 chat. The image is stored inline as a
+ * data URL so it survives reloads and is picked up by the album's message
+ * scan; the AI only reacts when an API key is configured.
+ */
+export async function sendImageMessage(
+  conversationId: string,
+  contact: Contact,
+  settings: AppSettings,
+  stickers: Sticker[],
+  imageDataUrl: string,
+): Promise<boolean> {
+  if (!imageDataUrl) return false
+
+  const now = await nextMessageTimestamp(conversationId)
+  const previousUserMessage = await db.messages.where('[conversationId+createdAt]')
+    .between([conversationId, Dexie.minKey], [conversationId, Dexie.maxKey], true, true)
+    .reverse().filter((message) => message.role === 'user').first()
+  const previousUserAt = previousUserMessage?.createdAt ?? 0
+  const msg: Message = {
+    id: uuid(),
+    conversationId,
+    role: 'user',
+    type: 'image',
+    content: '[图片]',
+    image: { url: imageDataUrl, presentation: 'sent' },
+    createdAt: now,
+  }
+  await db.transaction('rw', db.messages, db.conversations, async () => {
+    await db.messages.add(msg)
+    await db.conversations.update(conversationId, { updatedAt: now })
+  })
+
+  if (settings.apiKey) {
+    const streamId = uuid()
+    turns.begin(conversationId, streamId)
+    useChatEngineStore.getState().patch(conversationId, { error: '', typingLabel: displayName(contact) })
+    scheduleAiTurn(conversationId, contact, settings, stickers, streamId, '[用户发来一张图片]', '', previousUserAt || undefined, now)
+  }
+  return true
+}
+
+/**
  * Kicks off a reply from whatever's already in the conversation history,
  * without inserting a new user-role message first — for background actions
  * that write their own message directly (gifting an item from the

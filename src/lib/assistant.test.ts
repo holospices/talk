@@ -2,16 +2,22 @@ import { describe, expect, it } from 'vitest'
 import {
   clockToMinute,
   describePersonalScheduleDay,
+  diarySectionsFor,
+  diarySectionsToText,
   dueAssistantReminders,
+  emptyDiarySections,
   fillAssistantTemplate,
   isUserInDndNow,
   minuteToClock,
   nextAssistantReminder,
+  normalizeDiarySections,
   personalScheduleCoversMinute,
   personalScheduleDurationMinutes,
   personalScheduleItemAt,
+  specialDayMatchesDate,
+  specialDaysForDate,
 } from './assistant'
-import type { PersonalScheduleItem } from '../types'
+import type { PersonalScheduleItem, SpecialDay } from '../types'
 
 function scheduleItem(overrides: Partial<PersonalScheduleItem> = {}): PersonalScheduleItem {
   return {
@@ -120,5 +126,63 @@ describe('prompt helpers', () => {
     ])
     expect(text).toContain('23:00-07:00（次日） 睡觉')
     expect(text).toContain('09:00-12:00 上班（需要提醒、免打扰）')
+  })
+})
+
+describe('structured diary sections', () => {
+  it('accepts English and Chinese section keys and trims content', () => {
+    const sections = normalizeDiarySections({
+      events: '  上午写代码  ',
+      今日情绪: '平静',
+      assistantNotes: '今天还不错',
+    })
+    expect(sections?.events).toBe('上午写代码')
+    expect(sections?.emotion).toBe('平静')
+    expect(sections?.assistantNotes).toBe('今天还不错')
+    expect(sections?.growth).toBe('')
+  })
+
+  it('returns undefined when every section is empty', () => {
+    expect(normalizeDiarySections({ events: '  ', emotion: '' })).toBeUndefined()
+    expect(normalizeDiarySections(null)).toBeUndefined()
+  })
+
+  it('keeps legacy flat diaries readable under 今日事件', () => {
+    expect(diarySectionsFor({ content: '旧格式日记', sections: undefined }).events).toBe('旧格式日记')
+    expect(diarySectionsFor({ content: 'joined', sections: { ...emptyDiarySections(), emotion: '开心' } }).emotion).toBe('开心')
+  })
+
+  it('serializes only non-empty sections with their headings', () => {
+    const text = diarySectionsToText({ ...emptyDiarySections(), events: '事件内容', emotion: '情绪内容' })
+    expect(text).toContain('今日事件：\n事件内容')
+    expect(text).toContain('今日情绪：\n情绪内容')
+    expect(text).not.toContain('今日成长')
+  })
+})
+
+describe('special days', () => {
+  const day: SpecialDay = {
+    id: 'day-1',
+    date: '2026-02-17',
+    name: '春节',
+    repeatYearly: true,
+    createdAt: 1,
+    updatedAt: 1,
+  }
+
+  it('matches a yearly festival by month/day', () => {
+    expect(specialDayMatchesDate(day, '2027-02-17')).toBe(true)
+    expect(specialDayMatchesDate(day, '2027-02-18')).toBe(false)
+  })
+
+  it('matches a non-repeating date exactly', () => {
+    const fixed = { ...day, repeatYearly: false }
+    expect(specialDayMatchesDate(fixed, '2026-02-17')).toBe(true)
+    expect(specialDayMatchesDate(fixed, '2027-02-17')).toBe(false)
+  })
+
+  it('filters a day list for one date', () => {
+    const other = { ...day, id: 'day-2', date: '2026-02-17', name: '另一天' }
+    expect(specialDaysForDate([day, other], '2026-02-17').map((item) => item.name)).toEqual(['春节', '另一天'])
   })
 })

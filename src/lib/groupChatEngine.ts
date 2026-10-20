@@ -407,9 +407,36 @@ export async function sendGroupMessage(
   return true
 }
 
-/** Trigger a group reply after a non-text user action has already been stored. */
-export async function triggerGroupAiTurn(
+/** Sends a user-picked image into a group chat, then lets the members react. */
+export async function sendGroupImageMessage(
   conversationId: string,
+  group: Group,
+  members: Contact[],
+  settings: AppSettings,
+  stickers: Sticker[],
+  imageDataUrl: string,
+): Promise<boolean> {
+  if (!imageDataUrl) return false
+  const createdAt = await nextMessageTimestamp(conversationId)
+  const msg: Message = {
+    id: uuid(),
+    conversationId,
+    role: 'user',
+    type: 'image',
+    content: '[图片]',
+    image: { url: imageDataUrl, presentation: 'sent' },
+    createdAt,
+  }
+  await db.transaction('rw', db.messages, db.conversations, async () => {
+    await db.messages.add(msg)
+    await db.conversations.update(conversationId, { updatedAt: createdAt })
+  })
+  if (settings.apiKey && members.length > 0) await triggerGroupAiTurn(conversationId, group, members, settings, stickers)
+  return true
+}
+
+/** Trigger a group reply after a non-text user action has already been stored. */
+export async function triggerGroupAiTurn(  conversationId: string,
   group: Group,
   members: Contact[],
   settings: AppSettings,

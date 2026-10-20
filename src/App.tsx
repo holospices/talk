@@ -40,6 +40,7 @@ const loadImageProviderSettingsPage = () => import('./pages/ImageProviderSetting
 const loadOtherInterfacesPage = () => import('./pages/OtherInterfacesPage')
 const ChatPage = lazy(() => loadChatPage().then((m) => ({ default: m.ChatPage })))
 const ContactCardPage = lazy(() => loadContactCardPage().then((m) => ({ default: m.ContactCardPage })))
+const ContactGroupsPage = lazy(() => import('./pages/ContactGroupsPage').then((m) => ({ default: m.ContactGroupsPage })))
 const ContactAdminPage = lazy(() => import('./pages/ContactAdminPage').then((m) => ({ default: m.ContactAdminPage })))
 const ContactAddPage = lazy(() => loadContactAddPage().then((m) => ({ default: m.ContactAddPage })))
 const ContactGenerationTaskPage = lazy(() => import('./pages/ContactGenerationTaskPage').then((m) => ({ default: m.ContactGenerationTaskPage })))
@@ -292,6 +293,7 @@ function App() {
         </Route>
         <Route path="/chat/:conversationId" element={<ChatPage />} />
         <Route path="/contact/new" element={<ContactAddPage />} />
+        <Route path="/contact-groups" element={<ContactGroupsPage />} />
         <Route path="/contact-generation/:taskId" element={<ContactGenerationTaskPage />} />
         <Route path="/contact/:contactId" element={<ContactCardPage />} />
         <Route path="/group/new" element={<GroupAddPage />} />

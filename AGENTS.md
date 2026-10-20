@@ -353,11 +353,21 @@ v1做过一套完整的地图+日程+一次性任务系统，后来**用户明�
 
 ## 个人日程 + 小助理 + 每日日记（新增）
 用户自己的作息表，跟联系人各自的 `Contact.schedule` 是两套独立数据。
-- **数据表**（DB version 47）：`personalScheduleItems`（每日循环的作息项，`startMinute/endMinute` 为本地分钟数，`endMinute <= startMinute` 表示跨到次日）、`assistantDiaries`（`&date` 唯一索引，一天一篇，`status: draft|confirmed`）、`assistantReminderLogs`（`date+itemId` 幂等，避免每 30 秒重复提醒）。
+- **数据表**（DB version 47；后续 v48 又加了分组/节日/记忆提案，见下一节）：`personalScheduleItems`（每日循环的作息项，`startMinute/endMinute` 为本地分钟数，`endMinute <= startMinute` 表示跨到次日）、`assistantDiaries`（`&date` 唯一索引，一天一篇，`status: draft|confirmed`）、`assistantReminderLogs`（`date+itemId` 幂等，避免每 30 秒重复提醒）。
 - **核心逻辑** `src/lib/assistant.ts`：纯函数负责时间/覆盖/提醒窗口（`dueAssistantReminders` 会同时看昨天/今天/明天，支持跨午夜活动）、`runAssistantSchedule()` 是前台调度入口；提醒通过小助理的 1:1 会话写入一条 assistant 消息并弹 `NotificationBanner`，无 API Key 时用内置兜底文案；日记用当天全部 1:1/群聊记录 + 当前作息生成草稿。
 - **语义**：免打扰只拦截联系人主动聊天（`proactiveChat.ts` 开头的 `isUserInDndNow`），小助理的提醒仍然送达；免打扰之外是否有人主动发消息仍由 `proactiveChat` 模块开关控制。
 - **小助理**：`AppSettings.assistantContactId` 单值；联系人名片「关系与资料」里的「小助理」按钮弹出“是否将此联系人设置为小助理”，删除该联系人时会自动清空。日记确认后会（23:00 之后）弹“更改明日助理”通知，点击进日记页的助理选择器。
 - **时间点**：每天 23:00 自动写当天日记草稿；App 没开时下次打开只补写最近一天（更早日期在日历里手动“补写”）。日记必须由用户编辑/确认；确认后才触发换助理提醒。
 - **页面**：`/my-schedule`（每日作息编辑 + 提醒提示词）、`/diary`（月历 + 当天日记查看/编辑/确认 + 日记提示词）；入口在「我」页面的“我的日程”卡片。功能模块 id `assistantSchedule`，默认开启，旧设置通过 `useSettingsStore` version 32 迁移补上。
-- **备份**：`BACKUP_TABLES` 和 `BACKUP_SCHEMA_VERSION`（现在 11）已包含三张新表；旧备份缺少这三张表时按空表恢复。
+- **备份**：`BACKUP_TABLES` 和 `BACKUP_SCHEMA_VERSION`（现在 12）已包含这些新表；旧备份缺少新表时按空表恢复。
 - **测试**：`src/lib/assistant.test.ts` 覆盖时间解析、跨夜覆盖、提醒窗口、已发送去重和提示词占位符；Playwright 可种一条 `personalScheduleItems` + 一条 `assistantDiaries`，并用 `page.route('**/chat/completions')` 模拟模型返回，验证日记 prompt 同时带上日程和聊天。
+
+## 二次开发增强（DB v48 / settings v33，新增）
+- **联系人分组**：`contactGroups` 表（`id/name/contactIds[]`），页面 `/contact-groups`；`ContactsPage` 顶部分组 chip 过滤，多人可同时在多个分组。
+- **发送图片**：`chatEngine.sendImageMessage` 与 `groupChatEngine.sendGroupImageMessage` 把相册/拍照选择压缩成 data URL 后以 `type:'image'` 用户消息入库；相册扫描消息图片，来源标记为“聊天图片”；相册删除仍走 `hiddenAlbumUrls`（只从相册隐藏，不删聊天原文）。
+- **任命小助理的感想**：`assistant.ts` 的 `appointAssistant()` 在设置成功后调用 `triggerAiTurn`（上下文【本轮类型：被任命为小助理】）；没有 API Key 时写入一条兜底感想，保证用户能看到反馈。
+- **结构化日记**：`AssistantDiary.sections` 固定七栏（今日事件/今日情绪/今日成长/做的不错/可以调整的地方/明日最小行动/小助理碎碎念），`userReflection` 独立保存；生成时用 `jsonMode` + 固定 JSON schema，解析失败回退为“今日事件”；旧版 `content` 日记仍按今日事件显示。导出 `lib/diaryExport.ts`：Android 走 `BackupDirectory.stage/saveStaged` 系统保存选择器，Chromium 走 `showSaveFilePicker`，其余回退下载；支持单日与全部 Markdown 导出。
+- **特殊节日**：`specialDays`（`repeatYearly` 按月日匹配）+ `holidayGreetingLogs` 幂等表；日历上以第二个圆点/★标记，新增/删除在日记页“特殊节日”区块；`runAssistantSchedule()` 在 09:00 后、非免打扰时段，按 `holidayGreetingMaxContacts` 随机挑联系人调用 `triggerAiTurn`，由既有聊天工具决定是否附带红包/转账/礼物；`holidayGreetingEnabled` 可关闭。
+- **记忆先确认**：`memoryProposals` 表；`maybeUpdateMemory` 不再直接写 `Contact`，而是把 facts/style/plans/结构化记忆/关系变化暂存为 proposal，联系人页出现“待确认的记忆更新”卡片，可编辑 facts/style、修改/删除约定和记忆条目，确认后才写入并推进 `memoryMessageCursor`；放弃只推进游标、保留旧记忆。**注意：群聊的 `maybeUpdateGroupMemory` 仍按原逻辑直接写入，尚未接入 proposal。**
+- **数据/备份**：DB v48 新增上述四张表；`BACKUP_SCHEMA_VERSION` 12，旧备份缺表按空表恢复。设置新增 `holidayGreetingEnabled/holidayGreetingMaxContacts`（v33 迁移）。
+- **测试**：`assistant.test.ts` 增加结构化日记与节日匹配；Playwright 覆盖分组多选、任命感想、图片发送/相册删除、日记七栏+感想+导出入口、节日日历、记忆 proposal 确认/放弃。

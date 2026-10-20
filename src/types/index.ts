@@ -217,6 +217,24 @@ export interface PersonalScheduleItem {
   updatedAt: number
 }
 
+/** Structured sections of a diary written by the small assistant. */
+export interface AssistantDiarySections {
+  /** 今日事件 */
+  events: string
+  /** 今日情绪 */
+  emotion: string
+  /** 今日成长 */
+  growth: string
+  /** 做的不错 */
+  didWell: string
+  /** 可以调整的地方 */
+  canAdjust: string
+  /** 明日最小行动 */
+  tomorrowAction: string
+  /** 小助理碎碎念 */
+  assistantNotes: string
+}
+
 /** A diary written by the user's small assistant for one local calendar day. */
 export interface AssistantDiary {
   id: string
@@ -225,7 +243,12 @@ export interface AssistantDiary {
   assistantContactId: string
   /** Name snapshot, so old diaries still render after the contact is deleted/renamed. */
   assistantName: string
+  /** Joined plain-text form for old rows/exports. New rows also carry `sections`. */
   content: string
+  /** Structured diary body. Absent on rows created before the sectioned format. */
+  sections?: AssistantDiarySections
+  /** The user's own note, appended to the diary and editable independently. */
+  userReflection?: string
   status: 'draft' | 'confirmed'
   createdAt: number
   updatedAt: number
@@ -239,6 +262,71 @@ export interface AssistantReminderLog {
   date: string
   itemId: string
   sentAt: number
+}
+
+/** A user-created contact group; membership is a many-to-many list on purpose. */
+export interface ContactGroup {
+  id: string
+  name: string
+  contactIds: string[]
+  createdAt: number
+  updatedAt: number
+}
+
+/** A festival/special day shown on the diary calendar. */
+export interface SpecialDay {
+  id: string
+  /** YYYY-MM-DD. When `repeatYearly` is true only the month/day is matched. */
+  date: string
+  name: string
+  repeatYearly: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+/** Idempotency record for a holiday greeting sent by one contact. */
+export interface HolidayGreetingLog {
+  id: string
+  /** Actual calendar day the greeting was sent, YYYY-MM-DD. */
+  date: string
+  specialDayId: string
+  contactId: string
+  sentAt: number
+}
+
+/** One structured memory item proposed by the memory summarizer but not yet accepted. */
+export interface ProposedMemoryItem {
+  category: MemoryCategory
+  kind: MemoryKind
+  content: string
+  tags: string[]
+  importance: number
+  emotionalWeight: number
+  confidence: number
+  scope?: ContactMemoryScope
+  relatedContactIds?: string[]
+}
+
+/**
+ * Memory changes are staged here instead of being written to the contact
+ * immediately. The contact card lets the user edit/discard/confirm them.
+ */
+export interface MemoryProposal {
+  id: string
+  contactId: string
+  conversationId: string
+  createdAt: number
+  /** Number of messages already considered; confirming/discarding advances the cursor. */
+  messageCount: number
+  facts: string
+  style: string
+  plans: PlanItem[]
+  memoryItems: ProposedMemoryItem[]
+  warmth: number
+  relationshipDynamic: string
+  relationshipBase: string
+  status: 'pending' | 'confirmed' | 'discarded'
+  resolvedAt?: number
 }
 
 /** A reversible system change. New kinds (outfit, inventory, etc.) add their
@@ -1026,6 +1114,10 @@ export interface AppSettings {
   assistantDiaryPrompt: string
   /** Last day the "change tomorrow's assistant?" notification was already shown. */
   assistantChangePromptDate: string
+  /** Whether contacts should proactively greet the user on a saved special day. */
+  holidayGreetingEnabled: boolean
+  /** How many contacts may send a greeting per special day (API cost guard). */
+  holidayGreetingMaxContacts: number
   // ---- web search (see lib/webSearch.ts) ----
   tavilyApiKey: string // used only by the knowledge-base refresh job, not live during normal chat
   // ---- photo avatars/moments images (see lib/photoSearch.ts) ----

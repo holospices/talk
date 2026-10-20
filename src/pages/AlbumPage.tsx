@@ -5,7 +5,7 @@ import { useLiveQuery } from 'dexie-react-hooks'
 import { db } from '../db/db'
 import { useSettingsStore } from '../store/useSettingsStore'
 
-type AlbumSource = '动漫图库' | 'Pexels 实拍图' | '生图系统'
+type AlbumSource = '动漫图库' | 'Pexels 实拍图' | '生图系统' | '聊天图片'
 
 interface AlbumImage {
   url: string
@@ -51,7 +51,7 @@ export function AlbumLibraryView() {
       if (validImageUrl(moment.imageUrl)) add({ url: moment.imageUrl, createdAt: moment.createdAt, source: sourceFor(moment.imageUrl, undefined, moment.imagePhotographer), caption: moment.content })
     }
     for (const message of messages) {
-      if (validImageUrl(message.image?.url)) add({ url: message.image.url, createdAt: message.createdAt, source: sourceFor(message.image.url, message.image.provider, message.image.photographer), caption: message.image.caption ?? message.image.query })
+      if (validImageUrl(message.image?.url)) add({ url: message.image.url, createdAt: message.createdAt, source: message.role === 'user' ? '聊天图片' : sourceFor(message.image.url, message.image.provider, message.image.photographer), caption: message.image.caption ?? message.image.query })
     }
     for (const asset of mediaAssets) {
       const url = asset.dataUrl || asset.remoteUrl
@@ -95,7 +95,7 @@ export function AlbumLibraryView() {
         <div className="fixed inset-0 z-[100] flex flex-col bg-black">
           <div role="button" tabIndex={0} onClick={() => setSelected(null)} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') setSelected(null) }} className="flex min-h-16 cursor-pointer items-center justify-between px-3 pb-3 pt-[calc(env(safe-area-inset-top)+12px)] text-white"><button type="button" aria-label="关闭预览" onClick={() => setSelected(null)} className="flex h-14 w-14 items-center justify-center rounded-full bg-white/15 active:bg-white/25"><X size={28} /></button><span className="text-xs opacity-80">{selected.source}</span><span className="w-14" /></div>
           <div className="flex min-h-0 flex-1 items-center justify-center"><img src={selected.url} alt={selected.caption ?? selected.source} className="max-h-full max-w-full object-contain" /></div>
-          <div className="safe-area-bottom flex gap-3 p-4"><button type="button" onClick={() => void downloadImage(selected)} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-white py-3 text-sm text-gray-900"><Download size={18} />保存图片</button><button type="button" onClick={() => removeImage(selected.url)} className="flex items-center justify-center gap-2 rounded-xl bg-red-500 px-4 py-3 text-sm text-white"><Trash2 size={18} />删除</button></div>
+          <div className="safe-area-bottom flex gap-3 p-4"><button type="button" onClick={() => void downloadImage(selected)} className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-white py-3 text-sm text-gray-900"><Download size={18} />保存图片</button><button type="button" onClick={() => removeImage(selected.url)} className="flex items-center justify-center gap-2 rounded-xl bg-red-500 px-4 py-3 text-sm text-white"><Trash2 size={18} />从相册删除</button></div>
         </div>
       )}
     </>

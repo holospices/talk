@@ -10,7 +10,7 @@ import { AvatarPicker } from '../components/AvatarPicker'
 import { ActionSheet } from '../components/ActionSheet'
 import { SchedulePlanner } from '../components/SchedulePlanner'
 import { displayName } from '../lib/contact'
-import { activeUpcomingPlans, activeUpcomingPlansText, resetMemory } from '../lib/memory'
+import { activeUpcomingPlans, activeUpcomingPlansText, confirmMemoryProposal, discardMemoryProposal, getPendingMemoryProposal, resetMemory } from '../lib/memory'
 import { cascadeDeleteContactSocialData } from '../lib/moments'
 import { removeContactFromAllGroups } from '../lib/groupChat'
 import { describeCurrentSchedule, describeUpcomingScheduleText, isPhoneAvailable, scheduleOccurrencesForDate } from '../lib/schedule'
@@ -21,7 +21,7 @@ import { useModuleEnabled, isModuleEnabled } from '../features'
 import { warmthLabel, relationshipLine } from '../lib/relationship'
 import { buildUserProfileText } from '../lib/chatEngine'
 import { useSettingsStore } from '../store/useSettingsStore'
-import type { Contact, ContactMemoryScope, ContactRelationLabel, ScheduleBlock, ScheduleOverride } from '../types'
+import type { Contact, ContactMemoryScope, ContactRelationLabel, PlanItem, ProposedMemoryItem, ScheduleBlock, ScheduleOverride } from '../types'
 import { CONTACT_RELATION_LABELS } from '../types'
 import { removePairedContactRelation, setPairedContactRelation, uniqueRelationPairs } from '../lib/contactRelations'
 import { chatCompletionText as chatCompletion } from '../lib/deepseek'
@@ -34,9 +34,9 @@ import { contactSpeechVoice, isSpeechProviderReady, speechProviderName, speechVo
 import { synthesizeSpeech } from '../lib/speechSynthesis'
 import { isImageProviderReady, isStickerProviderReady } from '../lib/mediaProviders'
 import { privateTurnToolDefinition } from '../lib/chatAgentTools'
-import { ArrowUpFromLine, ChevronLeft, ChevronRight, ClipboardList, Phone, PhoneOff } from 'lucide-react'
+import { ArrowUpFromLine, ChevronLeft, ChevronRight, ClipboardList, Phone, PhoneOff, Trash2 } from 'lucide-react'
 import { currentOutfitItems } from '../lib/clothing'
-import { clearAssistantContact, setAssistantContact } from '../lib/assistant'
+import { appointAssistant, clearAssistantContact } from '../lib/assistant'
 
 const CALENDAR_HOUR_HEIGHT = 22
 
@@ -182,6 +182,11 @@ export function ContactCardPage() {
   const [testingSpeechVoice, setTestingSpeechVoice] = useState(false)
   const [speechVoiceStatus, setSpeechVoiceStatus] = useState('')
   const [relationDrafts, setRelationDrafts] = useState<Array<{ targetContactId: string; label: string }>>([])
+  const [proposalFacts, setProposalFacts] = useState('')
+  const [proposalStyle, setProposalStyle] = useState('')
+  const [proposalPlans, setProposalPlans] = useState<PlanItem[]>([])
+  const [proposalItems, setProposalItems] = useState<ProposedMemoryItem[]>([])
+  const [memoryNotice, setMemoryNotice] = useState('')
 
   const contact = useLiveQuery(() => (contactId ? db.contacts.get(contactId) : undefined), [contactId])
   const currentLocation = useLiveQuery(() => contact?.currentLocationId ? db.locations.get(contact.currentLocationId) : undefined, [contact?.currentLocationId])
@@ -204,6 +209,10 @@ export function ContactCardPage() {
     () => (contactId ? db.contactMemories.where('contactId').equals(contactId).reverse().sortBy('updatedAt') : []),
     [contactId],
   ) ?? []
+  const pendingMemory = useLiveQuery(
+    () => (contactId ? getPendingMemoryProposal(contactId) : undefined),
+    [contactId],
+  )
   const relationLinks = useLiveQuery(
     async () => {
       if (!contactId) return []
@@ -231,6 +240,33 @@ export function ContactCardPage() {
     },
     { private: [], group: [], interpersonal: [] } as Record<ContactMemoryScope, typeof structuredMemories>,
   )
+
+  useEffect(() => {
+    if (!pendingMemory) return
+    setProposalFacts(pendingMemory.facts)
+    setProposalStyle(pendingMemory.style)
+    setProposalPlans(pendingMemory.plans)
+    setProposalItems(pendingMemory.memoryItems)
+  }, [pendingMemory])
+
+  async function applyPendingMemory() {
+    if (!pendingMemory) return
+    await confirmMemoryProposal(pendingMemory.id, {
+      facts: proposalFacts,
+      style: proposalStyle,
+      plans: proposalPlans,
+      memoryItems: proposalItems,
+    })
+    setMemoryNotice('这次记忆更新已应用')
+  }
+
+  async function dropPendingMemory() {
+    if (!pendingMemory) return
+    if (!window.confirm('放弃这次记忆更新？这次整理出的内容不会写入名片，聊天记录不受影响。')) return
+    await discardMemoryProposal(pendingMemory.id)
+    setMemoryNotice('已放弃这次记忆更新')
+  }
+
   async function assignCareer() {
     if (!contact || !settings.apiKey) return
     const value = window.prompt(`输入职业（例如：${OCCUPATION_OPTIONS.slice(0,6).join('、')}）`, contact.occupation ?? '')?.trim()
@@ -326,6 +362,7 @@ export function ContactCardPage() {
     await removeContactFromAllGroups(contactId!)
     await db.contacts.delete(contactId!)
     await db.worldContactStates.where('contactId').equals(contactId!).delete()
+    await db.memoryProposals.where('contactId').equals(contactId!).delete()
     if (settings.assistantContactId === contactId) clearAssistantContact()
     void navigate('/contacts', { replace: true })
   }
@@ -463,15 +500,72 @@ export function ContactCardPage() {
         {activeSpeechProvider === 'none' || !isSpeechProviderReady(settings) ? <button type="button" onClick={() => navigate('/settings/speech-generation')} className="mt-3 w-full rounded-[var(--ui-radius-control)] border border-dashed border-[var(--ui-border)] px-3 py-3 text-sm text-[var(--ui-text-2)]">先配置语音生成服务</button> : <div className="mt-3 space-y-3">{!activeSpeechVoice && <p className="rounded-[var(--ui-radius-control)] bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-700">暂时没有对号入座。请选择一个音色，否则聊天里生成语音时会提醒回来设置。</p>}<label className="block text-xs text-[var(--ui-text-2)]">音色<select value={activeSpeechVoice?.voiceId ?? ''} onChange={(event) => void saveSpeechVoice(event.target.value)} className="mt-1 w-full rounded-[var(--ui-radius-control)] border border-[var(--ui-border)] bg-[var(--ui-surface)] px-3 py-2.5 text-sm text-[var(--ui-text)]"><option value="" disabled>请选择适合这位联系人的音色</option>{activeSpeechOptions.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}</select></label>{activeSpeechProvider === 'mimo' && activeSpeechVoice && <label className="block text-xs text-[var(--ui-text-2)]">声音演绎方式<textarea defaultValue={activeSpeechVoice.styleInstruction ?? ''} onBlur={(event) => void saveSpeechStyle(event.target.value)} placeholder="例如：低沉克制、语速稍慢，熟悉后更温柔" rows={2} className="mt-1 w-full resize-none rounded-[var(--ui-radius-control)] border border-[var(--ui-border)] px-3 py-2 text-sm text-[var(--ui-text)] outline-none" /></label>}{activeSpeechVoice && <button type="button" disabled={testingSpeechVoice} onClick={() => void testSpeechVoice()} className="w-full rounded-[var(--ui-radius-control)] bg-[var(--ui-action)] py-2.5 text-sm text-[var(--ui-on-action)] disabled:opacity-50">{testingSpeechVoice ? '生成试听中…' : '试听这位联系人的声音'}</button>}{speechVoiceStatus && <p className="text-xs leading-5 text-[var(--ui-text-2)]">{speechVoiceStatus}</p>}</div>}
       </section>}
 
+      {pendingMemory && (
+        <section className="mx-3 mt-4 rounded-[var(--ui-radius-card)] border border-[var(--ui-warning)] bg-[var(--ui-warning-soft)] px-4 py-4 shadow-[var(--ui-shadow)]">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h3 className="text-xs font-medium text-[var(--ui-warning-ink)]">待确认的记忆更新</h3>
+              <p className="mt-1 text-[11px] leading-5 text-[var(--ui-text-2)]">这是小助理从最近聊天里整理出来的。确认后才会写进名片；你可以直接修改，或删掉不想保留的内容。确认或放弃后才会继续整理新的记忆。</p>
+            </div>
+            <span className="shrink-0 rounded-full bg-[var(--ui-surface)] px-2 py-0.5 text-[10px] text-[var(--ui-warning-ink)]">待确认</span>
+          </div>
+
+          <label className="mt-3 block text-xs text-[var(--ui-text-2)]">
+            了解到的信息
+            <textarea value={proposalFacts} onChange={(event) => setProposalFacts(event.target.value)} rows={3} className="mt-1 w-full resize-y rounded-[var(--ui-radius-control)] border border-[var(--ui-border)] bg-[var(--ui-surface)] px-3 py-2 text-sm text-[var(--ui-text)]" />
+          </label>
+          <label className="mt-2 block text-xs text-[var(--ui-text-2)]">
+            相处状态
+            <textarea value={proposalStyle} onChange={(event) => setProposalStyle(event.target.value)} rows={3} className="mt-1 w-full resize-y rounded-[var(--ui-radius-control)] border border-[var(--ui-border)] bg-[var(--ui-surface)] px-3 py-2 text-sm text-[var(--ui-text)]" />
+          </label>
+
+          {proposalPlans.length > 0 && (
+            <div className="mt-3">
+              <p className="text-xs text-[var(--ui-text-2)]">整理出的约定</p>
+              <div className="mt-1 space-y-1.5">
+                {proposalPlans.map((plan, index) => (
+                  <div key={plan.id} className="flex items-center gap-2">
+                    <input value={plan.text} onChange={(event) => setProposalPlans((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, text: event.target.value } : row))} className="min-w-0 flex-1 rounded-[var(--ui-radius-control)] border border-[var(--ui-border)] bg-[var(--ui-surface)] px-3 py-2 text-sm text-[var(--ui-text)]" />
+                    {plan.date && <span className="shrink-0 text-[11px] text-[var(--ui-text-3)]">{plan.date}</span>}
+                    <button type="button" onClick={() => setProposalPlans((rows) => rows.filter((_, rowIndex) => rowIndex !== index))} aria-label="删除这条约定" className="flex h-8 w-8 shrink-0 items-center justify-center text-[var(--ui-text-3)]"><Trash2 size={14} /></button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {proposalItems.length > 0 && (
+            <div className="mt-3">
+              <p className="text-xs text-[var(--ui-text-2)]">整理出的记忆条目</p>
+              <div className="mt-1 space-y-1.5">
+                {proposalItems.map((item, index) => (
+                  <div key={`${item.kind}-${index}`} className="flex items-start gap-2">
+                    <textarea value={item.content} onChange={(event) => setProposalItems((rows) => rows.map((row, rowIndex) => rowIndex === index ? { ...row, content: event.target.value } : row))} rows={2} className="min-w-0 flex-1 resize-y rounded-[var(--ui-radius-control)] border border-[var(--ui-border)] bg-[var(--ui-surface)] px-3 py-2 text-sm text-[var(--ui-text)]" />
+                    <button type="button" onClick={() => setProposalItems((rows) => rows.filter((_, rowIndex) => rowIndex !== index))} aria-label="删除这条记忆" className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center text-[var(--ui-text-3)]"><Trash2 size={14} /></button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="mt-3 flex gap-2">
+            <button type="button" onClick={() => void applyPendingMemory()} className="ui-primary-action flex-1 py-2.5 text-sm font-medium">确认应用</button>
+            <button type="button" onClick={() => void dropPendingMemory()} className="ui-secondary-action flex-1 py-2.5 text-sm">放弃这次更新</button>
+          </div>
+          {memoryNotice && <p role="status" className="mt-2 text-xs text-[var(--ui-text-2)]">{memoryNotice}</p>}
+        </section>
+      )}
+
       <section className="mx-3 mt-4 rounded-[var(--ui-radius-card)] bg-white px-4 py-4 shadow-[var(--ui-shadow)]">
         <div className="mb-2 flex items-center justify-between">
-          <h3 className="text-xs font-medium text-gray-400">AI记忆（随聊天自动积累）</h3>
+          <h3 className="text-xs font-medium text-gray-400">AI记忆（已确认）</h3>
           {hasMemory && (
             <button onClick={() => setClearMemoryConfirm(true)} className="text-xs text-gray-400 underline">
               清空记忆
             </button>
           )}
         </div>
+        {!pendingMemory && memoryNotice && <p role="status" className="mb-2 text-xs text-[var(--ui-text-2)]">{memoryNotice}</p>}
         {hasMemory ? (
           <div className="space-y-2 text-sm leading-relaxed text-gray-600">
             <p>
@@ -525,7 +619,7 @@ export function ContactCardPage() {
             })}
           </div>
         ) : (
-          <p className="text-sm text-gray-400">还没有形成记忆 多聊几句之后会自己记住一些关于你的事</p>
+          <p className="text-sm text-gray-400">还没有已确认的记忆。新的记忆会先出现在待确认卡片里，由你决定是否写入。</p>
         )}
       </section>
 
@@ -602,7 +696,7 @@ export function ContactCardPage() {
               : '是否将此联系人设置为小助理？'}
           options={settings.assistantContactId === contact.id
             ? [{ label: '取消小助理', onSelect: () => clearAssistantContact(), danger: true }]
-            : [{ label: '确认设置', onSelect: () => setAssistantContact(contact.id) }]}
+            : [{ label: '确认设置', onSelect: () => void appointAssistant(contact.id) }]}
         />
       )}
       {editingRelations && (

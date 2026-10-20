@@ -24,6 +24,7 @@
     "src/pages/AppearancePage.tsx",
     "src/pages/ContactAdminPage.tsx",
     "src/pages/ContactCardPage.tsx",
+    "src/pages/ContactGroupsPage.tsx",
     "src/pages/ContactsPage.tsx",
     "src/pages/DesktopContactsPage.tsx",
     "src/pages/DesktopHomePage.tsx",

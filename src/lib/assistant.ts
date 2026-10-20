@@ -3,7 +3,8 @@ import { db } from '../db/db'
 import { useSettingsStore } from '../store/useSettingsStore'
 import { useChatUiStore } from '../store/useChatUiStore'
 import { chatCompletionText } from './deepseek'
-import { nextMessageTimestamp } from './chatEngine'
+import { parseJsonLoose } from './aiProtocol'
+import { nextMessageTimestamp, triggerAiTurn } from './chatEngine'
 import { displayName } from './contact'
 import { isAiTestId } from './aiTestIsolation'
 import { previewForMessage } from './messagePreview'
@@ -18,15 +19,75 @@ import {
 import type {
   AppSettings,
   AssistantDiary,
+  AssistantDiarySections,
   Contact,
   Conversation,
   Message,
   PersonalScheduleItem,
+  SpecialDay,
 } from '../types'
 
 const MINUTES_PER_DAY = 24 * 60
 const MAX_DIARY_CHAT_LINES = 120
 const MAX_DIARY_CHAT_LINE_CHARS = 160
+
+export const DIARY_SECTION_FIELDS: Array<{ key: keyof AssistantDiarySections; label: string }> = [
+  { key: 'events', label: '今日事件' },
+  { key: 'emotion', label: '今日情绪' },
+  { key: 'growth', label: '今日成长' },
+  { key: 'didWell', label: '做的不错' },
+  { key: 'canAdjust', label: '可以调整的地方' },
+  { key: 'tomorrowAction', label: '明日最小行动' },
+  { key: 'assistantNotes', label: '小助理碎碎念' },
+]
+
+export function emptyDiarySections(): AssistantDiarySections {
+  return {
+    events: '',
+    emotion: '',
+    growth: '',
+    didWell: '',
+    canAdjust: '',
+    tomorrowAction: '',
+    assistantNotes: '',
+  }
+}
+
+const DIARY_SECTION_ALIASES: Record<string, keyof AssistantDiarySections> = {
+  events: 'events', 今日事件: 'events',
+  emotion: 'emotion', 今日情绪: 'emotion',
+  growth: 'growth', 今日成长: 'growth',
+  didWell: 'didWell', 做的不错: 'didWell',
+  canAdjust: 'canAdjust', 可以调整的地方: 'canAdjust',
+  tomorrowAction: 'tomorrowAction', 明日最小行动: 'tomorrowAction',
+  assistantNotes: 'assistantNotes', 小助理碎碎念: 'assistantNotes',
+}
+
+/** Normalize a model/user supplied section object; returns undefined when every section is empty. */
+export function normalizeDiarySections(raw: unknown): AssistantDiarySections | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const record = raw as Record<string, unknown>
+  const sections = emptyDiarySections()
+  for (const [rawKey, value] of Object.entries(record)) {
+    const key = DIARY_SECTION_ALIASES[rawKey]
+    if (key && typeof value === 'string') sections[key] = value.trim().slice(0, 4000)
+  }
+  return DIARY_SECTION_FIELDS.some((field) => sections[field.key].trim()) ? sections : undefined
+}
+
+/** Legacy rows stored one flat `content` string; show that under 今日事件. */
+export function diarySectionsFor(diary: Pick<AssistantDiary, 'content' | 'sections'>): AssistantDiarySections {
+  if (diary.sections) return { ...emptyDiarySections(), ...diary.sections }
+  return { ...emptyDiarySections(), events: diary.content }
+}
+
+export function diarySectionsToText(sections: AssistantDiarySections): string {
+  return DIARY_SECTION_FIELDS
+    .filter((field) => sections[field.key].trim())
+    .map((field) => `${field.label}：\n${sections[field.key].trim()}`)
+    .join('\n\n')
+    .slice(0, 8000)
+}
 
 export interface DueAssistantReminder {
   /** The day the activity belongs to, YYYY-MM-DD. */
@@ -208,8 +269,132 @@ export function setAssistantContact(contactId: string): void {
   })
 }
 
+/**
+ * Makes a contact the small assistant and lets them react in their own voice.
+ * The reaction is a normal assistant message, so it lands in the chat history
+ * and benefits from the same persona/tool pipeline as any other turn.
+ */
+export async function appointAssistant(contactId: string): Promise<void> {
+  const current = useSettingsStore.getState()
+  if (current.assistantContactId === contactId) return
+  setAssistantContact(contactId)
+  const contact = await db.contacts.get(contactId)
+  if (!contact) return
+  const conversation = await ensureAssistantConversation(contact)
+  const settings = useSettingsStore.getState()
+  const context = '【本轮类型：被任命为小助理】用户刚刚把你设为 TA 的小助理。今后你负责在日程开始前提醒 TA，并在每晚帮 TA 写日记。请用你自己的口吻发一条简短的感想，表达你愿意做这件事、你会怎么提醒 TA。不要提“系统”“AI”“提示词”，不要写旁白，不要输出 JSON。'
+  if (settings.apiKey) {
+    await triggerAiTurn(conversation.id, contact, settings, await db.stickers.toArray(), context)
+    return
+  }
+  const createdAt = await nextMessageTimestamp(conversation.id)
+  const message: Message = {
+    id: uuid(),
+    conversationId: conversation.id,
+    role: 'assistant',
+    type: 'text',
+    content: '以后每天的提醒和日记就交给我吧。我会记得的。',
+    createdAt,
+  }
+  await db.messages.add(message)
+  await db.conversations.update(conversation.id, { updatedAt: createdAt })
+  if (useChatUiStore.getState().activeConversationId !== conversation.id) {
+    useChatUiStore.getState().showNotification({
+      id: uuid(),
+      conversationId: conversation.id,
+      contactName: displayName(contact),
+      contactAvatar: contact.avatar,
+      contactAvatarColor: contact.avatarColor,
+      preview: message.content,
+    })
+  }
+}
+
 export function clearAssistantContact(): void {
   useSettingsStore.getState().setSettings({ assistantContactId: '', assistantSince: 0 })
+}
+
+// ---------------------------------------------------------------------------
+// Special days / holiday greetings
+// ---------------------------------------------------------------------------
+
+export function specialDayMatchesDate(day: Pick<SpecialDay, 'date' | 'repeatYearly'>, dateKey: string): boolean {
+  return day.repeatYearly ? day.date.slice(5) === dateKey.slice(5) : day.date === dateKey
+}
+
+export function specialDaysForDate(days: SpecialDay[], dateKey: string): SpecialDay[] {
+  return days.filter((day) => specialDayMatchesDate(day, dateKey))
+}
+
+export async function getSpecialDays(): Promise<SpecialDay[]> {
+  return db.specialDays.orderBy('date').toArray()
+}
+
+export async function addSpecialDay(input: { date: string; name: string; repeatYearly: boolean }): Promise<void> {
+  const now = Date.now()
+  await db.specialDays.add({
+    id: uuid(),
+    date: input.date,
+    name: input.name.trim().slice(0, 30),
+    repeatYearly: input.repeatYearly,
+    createdAt: now,
+    updatedAt: now,
+  })
+}
+
+export async function deleteSpecialDay(id: string): Promise<void> {
+  await db.specialDays.delete(id)
+}
+
+const HOLIDAY_GREETING_HOUR = 9
+
+/**
+ * On a saved special day, a bounded number of contacts proactively send a
+ * greeting. Existing chat tools already know how to attach a red packet,
+ * transfer or gift, so the context simply invites them to do what fits.
+ */
+async function runHolidayGreetings(settings: AppSettings): Promise<void> {
+  if (!settings.holidayGreetingEnabled || !settings.apiKey) return
+  const now = new Date()
+  if (now.getHours() < HOLIDAY_GREETING_HOUR) return
+  if (isUserInDndNow(await getPersonalSchedule(), now)) return
+  const dateKey = toDateKey(now)
+  const days = specialDaysForDate(await getSpecialDays(), dateKey)
+  if (days.length === 0) return
+
+  const logs = await db.holidayGreetingLogs.where('date').equals(dateKey).toArray()
+  const greeted = new Set(logs.map((log) => `${log.specialDayId}:${log.contactId}`))
+  const [contacts, conversations, stickers] = await Promise.all([
+    db.contacts.toArray(),
+    db.conversations.toArray(),
+    db.stickers.toArray(),
+  ])
+  const conversationByContact = new Map(
+    conversations.filter((conversation) => conversation.contactId && !isAiTestId(conversation.id)).map((conversation) => [conversation.contactId!, conversation]),
+  )
+  const candidates = contacts
+    .filter((contact) => !isAiTestId(contact.id) && conversationByContact.has(contact.id))
+    .filter((contact) => days.some((day) => !greeted.has(`${day.id}:${contact.id}`)))
+  if (candidates.length === 0) return
+
+  const max = Math.max(1, Math.min(10, settings.holidayGreetingMaxContacts || 3))
+  const selected = [...candidates].sort(() => Math.random() - 0.5).slice(0, max)
+  const holidayNames = days.map((day) => day.name).join('、')
+  const context = `【本轮类型：特殊节日问候】今天是「${holidayNames}」。请结合你与用户的关系，主动发一条节日的祝福。可以自然地附带红包、转账或礼物（如果符合你们的关系和你的经济情况），不需要每样都发；不要提“系统”“安排”“提示词”，不要写旁白。`
+  for (const contact of selected) {
+    const conversation = conversationByContact.get(contact.id)
+    if (!conversation) continue
+    await triggerAiTurn(conversation.id, contact, settings, stickers, context)
+    for (const day of days) {
+      await db.holidayGreetingLogs.put({
+        id: uuid(),
+        date: dateKey,
+        specialDayId: day.id,
+        contactId: contact.id,
+        sentAt: Date.now(),
+      })
+    }
+  }
 }
 
 function assistantWasActiveOn(settings: AppSettings, dateKey: string): boolean {
@@ -254,6 +439,7 @@ export async function runAssistantSchedule(settings: AppSettings = useSettingsSt
     await deliverDueAssistantReminders(schedule, settings)
     await maybeGenerateAssistantDiary(settings)
     await maybePromptAssistantChangeAtNight(settings)
+    await runHolidayGreetings(settings)
   } catch (error) {
     console.warn('[assistant] 日程调度跳过:', error)
   } finally {
@@ -507,6 +693,9 @@ export async function generateAssistantDiary(
   if (!template.includes('{{schedule}}')) prompt += `\n\n${userName}今天的日程：\n${vars.schedule}`
   if (!template.includes('{{chats}}')) prompt += `\n\n今天的聊天记录：\n${vars.chats}`
 
+  prompt += `\n\n请严格只输出一个 JSON 对象，不要 Markdown 代码块，不要额外解释。字段必须全部存在，字符串可以为空，但不要添加其他字段：
+{"events":"今日事件……","emotion":"今日情绪……","growth":"今日成长……","didWell":"做的不错……","canAdjust":"可以调整的地方……","tomorrowAction":"明日最小行动……","assistantNotes":"小助理碎碎念……"}`
+
   const system = [
     `你是${assistantName}。以下是你的人物设定，写日记时必须保持这个人的性格、口吻和视角：`,
     assistant.systemPrompt.slice(0, 2200),
@@ -526,13 +715,19 @@ export async function generateAssistantDiary(
       { role: 'system', content: system },
       { role: 'user', content: prompt },
     ],
+    jsonMode: true,
     temperature: 0.85,
-    maxTokens: 1400,
+    maxTokens: 1800,
     purpose: 'other',
     automatic: true,
   })
-  const content = cleanDiaryContent(raw)
-  if (!content) throw new Error('模型没有写出内容，请稍后重试')
+  const parsed = parseJsonLoose<Record<string, unknown>>(raw)
+  const parsedSections = normalizeDiarySections(parsed)
+    ?? normalizeDiarySections(parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>).sections : undefined)
+  const fallbackContent = parsedSections ? '' : cleanDiaryContent(raw)
+  if (!parsedSections && !fallbackContent) throw new Error('模型没有写出内容，请稍后重试')
+  const sections = parsedSections ?? { ...emptyDiarySections(), events: fallbackContent }
+  const content = diarySectionsToText(sections)
 
   const now = Date.now()
   const diary: AssistantDiary = {
@@ -541,6 +736,8 @@ export async function generateAssistantDiary(
     assistantContactId: assistant.id,
     assistantName,
     content,
+    sections,
+    userReflection: existing?.userReflection ?? '',
     status: 'draft',
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
@@ -562,33 +759,56 @@ export async function generateAssistantDiary(
 function cleanDiaryContent(raw: string): string {
   return raw
     .trim()
-    .replace(/^```(?:markdown|text)?\s*/i, '')
+    .replace(/^```(?:markdown|text|json)?\s*/i, '')
     .replace(/\s*```$/, '')
     .replace(/^(日记|今日日记)[:：]\s*/, '')
     .trim()
     .slice(0, 4000)
 }
 
-export async function saveAssistantDiaryDraft(diaryId: string, content: string): Promise<void> {
-  const text = content.trim()
-  if (!text) throw new Error('日记不能为空')
-  await db.assistantDiaries.update(diaryId, { content: text, updatedAt: Date.now() })
+export interface AssistantDiaryPatch {
+  sections?: AssistantDiarySections
+  userReflection?: string
 }
 
-export async function confirmAssistantDiary(diaryId: string, content?: string): Promise<AssistantDiary | undefined> {
+export async function saveAssistantDiaryDraft(diaryId: string, patch: AssistantDiaryPatch): Promise<void> {
+  const diary = await db.assistantDiaries.get(diaryId)
+  if (!diary) return
+  const sections = patch.sections ?? diarySectionsFor(diary)
+  if (!DIARY_SECTION_FIELDS.some((field) => sections[field.key].trim())) throw new Error('日记不能为空')
+  await db.assistantDiaries.update(diaryId, {
+    sections,
+    content: diarySectionsToText(sections),
+    userReflection: patch.userReflection ?? diary.userReflection ?? '',
+    updatedAt: Date.now(),
+  })
+}
+
+export async function saveAssistantDiaryReflection(diaryId: string, userReflection: string): Promise<void> {
+  await db.assistantDiaries.update(diaryId, {
+    userReflection: userReflection.trim().slice(0, 4000),
+    updatedAt: Date.now(),
+  })
+}
+
+export async function confirmAssistantDiary(diaryId: string, patch: AssistantDiaryPatch = {}): Promise<AssistantDiary | undefined> {
   const diary = await db.assistantDiaries.get(diaryId)
   if (!diary) return undefined
-  const text = (content ?? diary.content).trim()
-  if (!text) throw new Error('日记不能为空')
+  const sections = patch.sections ?? diarySectionsFor(diary)
+  if (!DIARY_SECTION_FIELDS.some((field) => sections[field.key].trim())) throw new Error('日记不能为空')
   const now = Date.now()
+  const content = diarySectionsToText(sections)
+  const userReflection = (patch.userReflection ?? diary.userReflection ?? '').trim().slice(0, 4000)
   await db.assistantDiaries.update(diaryId, {
-    content: text,
+    sections,
+    content,
+    userReflection,
     status: 'confirmed',
     confirmedAt: now,
     updatedAt: now,
   })
   void maybeNotifyAssistantChange(diary.date)
-  return { ...diary, content: text, status: 'confirmed', confirmedAt: now, updatedAt: now }
+  return { ...diary, sections, content, userReflection, status: 'confirmed', confirmedAt: now, updatedAt: now }
 }
 
 /** At/after 23:00, a confirmed diary triggers the "change tomorrow's assistant?" prompt. */
