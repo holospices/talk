@@ -112,28 +112,6 @@ npm run release:apk      # 空 Key 构建、扫描并生成 Android APK
 
 Bug、文档、界面、测试和新想法都欢迎。请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，适合第一次参与的任务会标记 [`good first issue`](https://github.com/Entropy2077-axe/talk/labels/good%20first%20issue)。
 
-## Android 本地构建与更新
-
-当前 APK 使用固定 release 签名，包名 `com.talk.aichat`。后续版本只要保持包名和签名不变，就可以直接覆盖安装并保留本地数据。
-
-```powershell
-# 1. 修改 package.json 的 version，以及 android/app/build.gradle 的 versionCode/versionName
-# 2. 构建前端资源
-npm run build
-npx cap sync android
-
-# 3. 构建签名 APK
-$env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot'
-$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
-$env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
-$env:JAVA_TOOL_OPTIONS = '-Djavax.net.ssl.trustStoreType=WINDOWS-ROOT'
-cd android
-.\gradlew.bat assembleRelease
-```
-
-APK 输出：`android/app/build/outputs/apk/release/app-release.apk`。
-
-签名文件与密码不在仓库中，保存在本机 `D:\dswork\talk-release-key`。**必须自行备份该目录**；丢失后无法再覆盖升级已安装的 APK。`android/` 目录也未提交到 Git，换机器时需要重新 `npx cap add android` 并恢复签名配置。
 
 ## English summary
 
