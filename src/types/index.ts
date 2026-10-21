@@ -1253,7 +1253,7 @@ export interface PromptPreset {
 export interface AdminLogRecord { id: string; level: 'log' | 'info' | 'warn' | 'error'; message: string; createdAt: number }
 export type AdminAiTraceStage = 'original_generation' | 'tool_call' | 'review_and_repair' | 'json_translation' | 'image_generation' | 'sticker_lookup' | 'schedule_change' | 'location_change' | 'clothing_change' | 'first_chat' | 'first_quality' | 'second_chat' | 'other' | 'second_quality'
 /** A single timeline includes model calls and deterministic follow-up work. */
-export interface AdminAiTrace { id: string; purpose: AiUsagePurpose; model: string; messages: { role: string; content: string }[]; output?: string; error?: string; inputTokens: number; outputTokens: number; durationMs?: number; createdAt: number; turnId?: string; stage?: AdminAiTraceStage; conversationId?: string; diagnostics?: Record<string, unknown> }
+export interface AdminAiTrace { id: string; purpose: AiUsagePurpose; model: string; messages: { role: string; content: string }[]; output?: string; error?: string; inputTokens: number; outputTokens: number; durationMs?: number; createdAt: number; turnId?: string; stage?: AdminAiTraceStage; conversationId?: string; label?: string; diagnostics?: Record<string, unknown> }
 export interface SaveSlot { id: string; slot: number; name: string; createdAt: number; updatedAt: number; snapshot: unknown }
 
 /** A contact-owned story branch.  The active branch is the one currently used by chat. */

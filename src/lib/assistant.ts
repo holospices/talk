@@ -540,6 +540,7 @@ async function composeAssistantReminder(
       thinking: 'disabled',
       purpose: 'other',
       automatic: true,
+      trace: { turnId: `reminder-${uuid()}`, stage: 'other', label: '提醒生成' },
     })
     return cleanAssistantReminder(raw) || fallback
   } catch (error) {
@@ -721,6 +722,7 @@ export async function generateAssistantDiary(
     maxTokens: 1800,
     purpose: 'other',
     automatic: true,
+    trace: { turnId: `diary-${uuid()}`, stage: 'other', label: '日记生成' },
   })
   const parsed = parseJsonLoose<Record<string, unknown>>(raw)
   const parsedSections = normalizeDiarySections(parsed)

@@ -1,4 +1,4 @@
-import type { AdminAiTrace, AdminAiTraceStage } from '../types'
+import type { AdminAiTrace, AdminAiTraceStage, AiUsagePurpose } from '../types'
 
 export const AI_TRACE_STAGE_LABEL: Record<AdminAiTraceStage, string> = {
   original_generation: '原文生成',
@@ -60,16 +60,27 @@ export function formatTraceDuration(durationMs?: number): string {
   return `${(durationMs / 1000).toFixed(durationMs < 10_000 ? 2 : 1)} s`
 }
 
+const PURPOSE_LABELS: Record<AiUsagePurpose, string> = {
+  chat: '对话回复',
+  proactive: '主动私聊',
+  memory: '记忆更新',
+  moments: '朋友圈',
+  worldbook: '世界书',
+  offlineState: '离线经历',
+  persona: '人物生成',
+  quality: '质量检查',
+  other: '其他',
+}
+
 export function traceStageLabel(trace: AdminAiTrace): string {
+  if (trace.label) return trace.label
   if (trace.purpose === 'memory') return '记忆整理'
   return trace.stage ? AI_TRACE_STAGE_LABEL[trace.stage] : trace.purpose
 }
 
 function tracePurposeLabel(trace: AdminAiTrace): string {
-  if (trace.purpose === 'proactive') return '主动私聊'
-  if (trace.purpose === 'chat') return '对话回复'
-  if (trace.purpose === 'memory') return '记忆更新'
-  return trace.purpose
+  if (trace.label) return trace.label
+  return PURPOSE_LABELS[trace.purpose] ?? trace.purpose
 }
 
 /** One expandable request/response step, shared by Sky Eye, conversation and global trace pages. */

@@ -60,7 +60,7 @@ export function coalesceConsecutiveRoles(messages: ChatMessage[]): ChatMessage[]
   return result
 }
 
-async function traceAiCall(opts: { purpose: AiUsagePurpose; model: string; messages: ChatMessage[]; output?: string; error?: string; inputTokens: number; outputTokens: number; durationMs?: number; turnId?: string; stage?: AdminAiTraceStage; conversationId?: string; diagnostics?: Record<string, unknown> }) {
+async function traceAiCall(opts: { purpose: AiUsagePurpose; model: string; messages: ChatMessage[]; output?: string; error?: string; inputTokens: number; outputTokens: number; durationMs?: number; turnId?: string; stage?: AdminAiTraceStage; conversationId?: string; label?: string; diagnostics?: Record<string, unknown> }) {
   try {
     await db.adminAiTraces.add({ id: uuid(), ...opts, createdAt: Date.now() })
     const count = await db.adminAiTraces.count()
@@ -193,7 +193,7 @@ export interface ChatCompletionOptions {
   maxTokens?: number
   temperature?: number
   thinking?: 'enabled' | 'disabled'
-  trace?: { turnId: string; stage: AdminAiTraceStage; conversationId?: string }
+  trace?: { turnId: string; stage: AdminAiTraceStage; conversationId?: string; label?: string }
   /** Never issue an empty-response retry. Reserved for explicit diagnostics. */
   singleRequest?: boolean
   tools?: ChatToolDefinition[]

@@ -13,13 +13,45 @@ const EMPTY_TRACES: AdminAiTrace[] = []
 const EMPTY_CONVERSATIONS: Conversation[] = []
 const EMPTY_CONTACTS: Contact[] = []
 const EMPTY_GROUPS: Group[] = []
-type PurposeFilter = 'proactive' | 'chat' | 'memory' | 'all'
+
+type CategoryKey = 'privateChat' | 'memory' | 'diary' | 'reminder' | 'moments' | 'persona' | 'worldbook' | 'offlineState' | 'quality' | 'other'
+type FilterKey = 'all' | CategoryKey
+
+const CATEGORY_LABELS: Record<CategoryKey, string> = {
+  privateChat: '私聊',
+  memory: '记忆更新',
+  diary: '日记生成',
+  reminder: '提醒生成',
+  moments: '朋友圈',
+  persona: '人物生成',
+  worldbook: '世界书',
+  offlineState: '离线经历',
+  quality: '质量检查',
+  other: '其他',
+}
+
+const FILTERS: CategoryKey[] = ['privateChat', 'memory', 'diary', 'reminder', 'moments', 'persona', 'worldbook', 'offlineState', 'quality', 'other']
+
+function categoryForTrace(trace: AdminAiTrace): CategoryKey {
+  if (trace.label === '日记生成') return 'diary'
+  if (trace.label === '提醒生成') return 'reminder'
+  if (trace.purpose === 'chat' || trace.purpose === 'proactive') return 'privateChat'
+  return trace.purpose as CategoryKey
+}
+
+function categoryForTurn(traces: AdminAiTrace[]): CategoryKey {
+  return traces.map(categoryForTrace)[0] ?? 'other'
+}
+
+function isCategoryKey(value: string | null): value is CategoryKey {
+  return !!value && value in CATEGORY_LABELS
+}
 
 export function AiRequestsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const [filter, setFilter] = useState<PurposeFilter>(() => {
+  const [filter, setFilter] = useState<FilterKey>(() => {
     const purpose = searchParams.get('purpose')
-    return purpose === 'proactive' || purpose === 'chat' || purpose === 'memory' ? purpose : 'all'
+    return isCategoryKey(purpose) ? purpose : 'all'
   })
   const [query, setQuery] = useState('')
   const [openTurn, setOpenTurn] = useState<string>('latest')
@@ -27,7 +59,7 @@ export function AiRequestsPage() {
   const traces = useLiveQuery(async () => {
     const rows = await db.adminAiTraces.toArray()
     return rows
-      .filter((trace) => !!trace.conversationId && !isAiTestId(trace.conversationId) && (trace.purpose === 'chat' || trace.purpose === 'proactive' || trace.purpose === 'memory'))
+      .filter((trace) => !isAiTestId(trace.conversationId) && trace.model !== '本地执行')
       .sort((a, b) => b.createdAt - a.createdAt)
   }, []) ?? EMPTY_TRACES
   const conversations = useLiveQuery(() => db.conversations.toArray(), []) ?? EMPTY_CONVERSATIONS
@@ -52,15 +84,12 @@ export function AiRequestsPage() {
   const turns = useMemo(() => {
     const grouped = groupAiTraces(traces)
     return grouped.filter((turn) => {
-      const proactive = turn.traces.some((trace) => trace.purpose === 'proactive')
-      const chat = turn.traces.some((trace) => trace.purpose === 'chat')
-      const memory = turn.traces.some((trace) => trace.purpose === 'memory')
-      if (filter === 'proactive' && !proactive) return false
-      if (filter === 'chat' && !chat) return false
-      if (filter === 'memory' && !memory) return false
+      const category = categoryForTurn(turn.traces)
+      if (filter !== 'all' && category !== filter) return false
       if (!query.trim()) return true
       const label = turn.conversationId ? conversationLabel.get(turn.conversationId) ?? '' : ''
-      return label.toLowerCase().includes(query.trim().toLowerCase())
+      const searchable = `${label} ${CATEGORY_LABELS[category]} ${turn.traces.map((trace) => trace.label ?? '').join(' ')}`
+      return searchable.toLowerCase().includes(query.trim().toLowerCase())
     })
   }, [traces, filter, query, conversationLabel])
 
@@ -68,7 +97,7 @@ export function AiRequestsPage() {
     if (openTurn === 'latest' && turns.length > 0) setOpenTurn(turns[0].id)
   }, [openTurn, turns])
 
-  function changeFilter(next: PurposeFilter) {
+  function changeFilter(next: FilterKey) {
     setFilter(next)
     setOpenTurn('latest')
     const params = new URLSearchParams(searchParams)
@@ -82,51 +111,67 @@ export function AiRequestsPage() {
       <TopBar title="AI 请求记录" showBack />
       <div className="ui-page-scroll">
         <header className="ui-page-intro">
-          <p className="ui-page-kicker">全部会话 · 最近 {traces.length} 条调用</p>
+          <p className="ui-page-kicker">全部模型调用 · 最近 {traces.length} 条</p>
           <h1 className="ui-page-title">AI 到底收到了什么</h1>
           <p className="ui-page-summary">
-            不经过功能管理或天眼，直接看每一次请求的完整 system/user 消息与模型返回。每条记录按「联系人 · 类型」命名，类型包括主动私聊、对话回复和记忆更新。记录只保留最近 500 条调用。
+            所有模型请求都在这里：私聊（含对话回复和主动私聊）、记忆更新、日记、提醒、朋友圈、人物生成等。每条按「联系人/系统 · 类型」命名，展开可看完整 system/user 消息与返回。本地执行事件不计入；记录保留最近 500 条调用。
           </p>
-          <div className="mt-3 flex flex-wrap items-center gap-1.5">
-            {([['proactive', '主动私聊'], ['chat', '对话回复'], ['memory', '记忆更新'], ['all', '全部']] as Array<[PurposeFilter, string]>).map(([value, label]) => (
+          <div className="mt-3 flex gap-1.5 overflow-x-auto pb-1">
+            <button
+              type="button"
+              onClick={() => changeFilter('all')}
+              className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-xs ${filter === 'all' ? 'bg-[var(--ui-action)] text-[var(--ui-on-action)]' : 'bg-[var(--ui-surface-2)] text-[var(--ui-text-2)]'}`}
+            >
+              全部
+            </button>
+            {FILTERS.map((key) => (
               <button
-                key={value}
+                key={key}
                 type="button"
-                onClick={() => changeFilter(value)}
-                className={`rounded-full px-3 py-1.5 text-xs ${filter === value ? 'bg-[var(--ui-action)] text-[var(--ui-on-action)]' : 'bg-[var(--ui-surface-2)] text-[var(--ui-text-2)]'}`}
+                onClick={() => changeFilter(key)}
+                className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-xs ${filter === key ? 'bg-[var(--ui-action)] text-[var(--ui-on-action)]' : 'bg-[var(--ui-surface-2)] text-[var(--ui-text-2)]'}`}
               >
-                {label}
+                {CATEGORY_LABELS[key]}
               </button>
             ))}
-            <label className="ml-auto flex min-w-0 items-center gap-1.5 rounded-full bg-[var(--ui-surface-2)] px-2.5 py-1.5">
-              <Search size={13} className="text-[var(--ui-text-3)]" />
-              <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="按联系人筛选" className="w-24 bg-transparent text-xs text-[var(--ui-text)] outline-none" />
-            </label>
           </div>
+          <label className="mt-2 flex w-full items-center gap-1.5 rounded-full bg-[var(--ui-surface-2)] px-3 py-2">
+            <Search size={13} className="shrink-0 text-[var(--ui-text-3)]" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="按联系人 / 类型筛选" className="min-w-0 flex-1 bg-transparent text-xs text-[var(--ui-text)] outline-none" />
+          </label>
         </header>
 
         <h2 className="ui-section-label">{turns.length} 个回合</h2>
         <div className="mx-4 space-y-2 pb-6">
           {turns.length === 0 && (
             <div className="ui-empty-state">
-              <p>{filter === 'proactive' ? '还没有主动私聊的记录。' : filter === 'memory' ? '还没有记忆更新的记录。' : '还没有可显示的请求记录。'}</p>
-              <p className="mt-1 text-xs text-[var(--ui-text-3)]">让联系人主动发一条消息，或打开任意聊天发一条消息后再回来。</p>
+              <p>{filter === 'all' ? '还没有可显示的请求记录。' : `还没有「${CATEGORY_LABELS[filter]}」的记录。`}</p>
+              <p className="mt-1 text-xs text-[var(--ui-text-3)]">聊天、主动私聊、记忆整理或日记生成后，再回来看看。</p>
             </div>
           )}
           {turns.map((turn, index) => {
             const open = openTurn === turn.id || (openTurn === 'latest' && index === 0)
             const ordered = orderedTraceSteps(turn.traces)
-            const proactive = ordered.some((trace) => trace.purpose === 'proactive')
-            const memory = ordered.some((trace) => trace.purpose === 'memory')
-            const typeLabel = proactive ? '主动私聊' : memory ? '记忆更新' : '对话回复'
+            const category = categoryForTurn(ordered)
+            const categoryLabel = CATEGORY_LABELS[category]
+            const privateDetail = ordered.some((trace) => trace.purpose === 'proactive')
+              ? '主动私聊'
+              : ordered.some((trace) => trace.purpose === 'chat') ? '对话回复' : '私聊'
+            const contactLabel = turn.conversationId ? conversationLabel.get(turn.conversationId) : undefined
+            const title = contactLabel
+              ? `${contactLabel} · ${category === 'privateChat' ? privateDetail : categoryLabel}`
+              : category === 'diary' || category === 'reminder'
+                ? `小助理 · ${categoryLabel}`
+                : category === 'privateChat'
+                  ? `系统 · ${privateDetail}`
+                  : `系统 · ${categoryLabel}`
             const failed = ordered.find((trace) => trace.error)
-            const label = turn.conversationId ? conversationLabel.get(turn.conversationId) ?? '未知会话' : '未知会话'
             return (
               <section key={turn.id} className="overflow-hidden rounded-[var(--ui-radius-card)] bg-[var(--ui-surface)] shadow-[var(--ui-shadow)]">
                 <button type="button" onClick={() => setOpenTurn(open ? '' : turn.id)} aria-expanded={open} className="w-full px-4 py-3 text-left">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-[var(--ui-text)]">{label} · {typeLabel}</p>
+                      <p className="truncate text-sm font-medium text-[var(--ui-text)]">{title}</p>
                       <div className="mt-1.5 flex flex-wrap gap-1">
                         {ordered.map((trace) => (
                           <span key={trace.id} className="rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-1.5 py-0.5 text-[10px] text-[var(--ui-text-2)]">
