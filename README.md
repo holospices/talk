@@ -7,10 +7,13 @@
 
   本地优先的 AI companion：创建独一无二的联系人，与 DeepSeek 进行拟人化聊天，并在长期互动中积累记忆、关系、朋友圈和共同经历。
 
-  [🌐 在线体验](https://entropy2077-axe.github.io/talk/) · [📱 下载 Android APK](https://github.com/Entropy2077-axe/talk/releases/latest) · [💬 提交反馈](https://github.com/Entropy2077-axe/talk/issues/new/choose)
+  [原项目](https://github.com/Entropy2077-axe/talk) · [下载 Android APK](https://github.com/holospices/talk/releases/latest) · [问题反馈](https://github.com/holospices/talk/issues)
 
   如果你喜欢这个项目，欢迎点一个 ⭐ Star，让更多人看见它。
 </div>
+
+> [!NOTE]
+> 本仓库是 [holospices](https://github.com/holospices) 基于 [Entropy2077-axe/talk](https://github.com/Entropy2077-axe/talk) 的二次开发版本，遵循原项目的 MIT License。这里的功能、界面和构建配置可能与上游不同；上游更新不会自动合并进来。
 
 > [!IMPORTANT]
 > Talk 不提供公共 AI 代理，也不会在网页或 APK 中内置 API Key。你需要填写自己的 DeepSeek API Key；Key、联系人和聊天数据只保存在当前设备。清理浏览器数据前请先导出备份。
@@ -109,10 +112,33 @@ npm run release:apk      # 空 Key 构建、扫描并生成 Android APK
 
 Bug、文档、界面、测试和新想法都欢迎。请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)，适合第一次参与的任务会标记 [`good first issue`](https://github.com/Entropy2077-axe/talk/labels/good%20first%20issue)。
 
+## Android 本地构建与更新
+
+当前 APK 使用固定 release 签名，包名 `com.talk.aichat`。后续版本只要保持包名和签名不变，就可以直接覆盖安装并保留本地数据。
+
+```powershell
+# 1. 修改 package.json 的 version，以及 android/app/build.gradle 的 versionCode/versionName
+# 2. 构建前端资源
+npm run build
+npx cap sync android
+
+# 3. 构建签名 APK
+$env:JAVA_HOME = 'C:\Program Files\Eclipse Adoptium\jdk-21.0.12.101-hotspot'
+$env:ANDROID_HOME = "$env:LOCALAPPDATA\Android\Sdk"
+$env:ANDROID_SDK_ROOT = $env:ANDROID_HOME
+$env:JAVA_TOOL_OPTIONS = '-Djavax.net.ssl.trustStoreType=WINDOWS-ROOT'
+cd android
+.\gradlew.bat assembleRelease
+```
+
+APK 输出：`android/app/build/outputs/apk/release/app-release.apk`。
+
+签名文件与密码不在仓库中，保存在本机 `D:\dswork\talk-release-key`。**必须自行备份该目录**；丢失后无法再覆盖升级已安装的 APK。`android/` 目录也未提交到 Git，换机器时需要重新 `npx cap add android` 并恢复签名配置。
+
 ## English summary
 
 Talk is a local-first, WeChat-inspired AI companion app powered by DeepSeek. It features persistent memories, evolving relationships, autonomous moments, multi-character group chats, and an Android build via Capacitor. Your API keys and conversation data stay on your device; no project backend is involved.
 
 ## License
 
-[MIT](LICENSE) © 2026 Entropy2077-axe
+[MIT](LICENSE) © 2026 Entropy2077-axe；二次开发修改部分 © 2026 holospices
