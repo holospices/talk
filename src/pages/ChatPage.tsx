@@ -1020,7 +1020,7 @@ export function ChatPage() {
               tools={desktop ? <>
                 <button type="button" onClick={openStickers} aria-label="搜索表情包" title="表情包"><StickerIcon size={18} /></button>
                 <button type="button" onClick={() => imageInputRef.current?.click()} aria-label="发送图片" title="发送图片"><ImagePlus size={18} /></button>
-                <button type="button" onClick={() => { if (conversationId) void navigate(`/chat/${conversationId}/ai-trace`) }} aria-label="AI 请求记录" title="AI 请求记录"><Bug size={18} /></button>
+                <button type="button" onClick={() => void navigate('/ai-requests')} aria-label="AI 请求记录" title="AI 请求记录"><Bug size={18} /></button>
                 {!isGroupConv && careerEnabled && <>
                   <span className="desktop-chat-tool-divider" />
                   <button type="button" onClick={() => setFinanceMode('transfer')} aria-label="转账" title="转账"><ArrowLeftRight size={18} /></button>
@@ -1152,7 +1152,7 @@ export function ChatPage() {
       {appsOpen && (
         <ActionSheet onClose={()=>setAppsOpen(false)} options={[
           {label:'发送图片',onSelect:()=>{setAppsOpen(false);imageInputRef.current?.click()}},
-          {label:'AI 请求记录',onSelect:()=>{setAppsOpen(false);if(conversationId)void navigate(`/chat/${conversationId}/ai-trace`)}},
+          {label:'AI 请求记录',onSelect:()=>{setAppsOpen(false);void navigate('/ai-requests')}},
           {label:'搜索远程表情包',onSelect:()=>{setAppsOpen(false);setStickerPickerOpen(true);setStickerQuery('');setStickerResults([])}},
           ...(!isGroupConv&&careerEnabled?[{label:'转账',onSelect:()=>{setAppsOpen(false);setFinanceMode('transfer' as const)}},{label:'红包',onSelect:()=>{setAppsOpen(false);setFinanceMode('redPacket' as const)}},{label:'借款',onSelect:()=>{setAppsOpen(false);setFinanceMode('loan' as const)}},{label:'归还借款',onSelect:()=>{setAppsOpen(false);void repayLoan()}}]:[]),
           ...(careerEnabled?[{label:'工作',onSelect:()=>navigate('/work')}]:[]),

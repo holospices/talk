@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useSearchParams } from 'react-router-dom'
 import { Search } from 'lucide-react'
 import { TopBar } from '../components/TopBar'
 import { AiTraceStep, groupAiTraces, orderedTraceSteps, traceStageLabel } from '../components/AiTraceView'
@@ -16,7 +16,6 @@ const EMPTY_GROUPS: Group[] = []
 type PurposeFilter = 'proactive' | 'chat' | 'all'
 
 export function AiRequestsPage() {
-  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [filter, setFilter] = useState<PurposeFilter>(() => searchParams.get('purpose') === 'proactive' ? 'proactive' : searchParams.get('purpose') === 'chat' ? 'chat' : 'all')
   const [query, setQuery] = useState('')
@@ -24,7 +23,9 @@ export function AiRequestsPage() {
 
   const traces = useLiveQuery(async () => {
     const rows = await db.adminAiTraces.toArray()
-    return rows.filter((trace) => !isAiTestId(trace.conversationId)).sort((a, b) => b.createdAt - a.createdAt)
+    return rows
+      .filter((trace) => !!trace.conversationId && !isAiTestId(trace.conversationId) && (trace.purpose === 'chat' || trace.purpose === 'proactive'))
+      .sort((a, b) => b.createdAt - a.createdAt)
   }, []) ?? EMPTY_TRACES
   const conversations = useLiveQuery(() => db.conversations.toArray(), []) ?? EMPTY_CONVERSATIONS
   const contacts = useLiveQuery(() => db.contacts.toArray(), []) ?? EMPTY_CONTACTS
@@ -97,9 +98,6 @@ export function AiRequestsPage() {
               <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="按联系人筛选" className="w-24 bg-transparent text-xs text-[var(--ui-text)] outline-none" />
             </label>
           </div>
-          <button type="button" onClick={() => void navigate('/proactive-settings')} className="ui-secondary-action mt-3 inline-flex w-auto items-center px-3 py-2 text-xs">
-            调整主动私聊提示词 ›
-          </button>
         </header>
 
         <h2 className="ui-section-label">{turns.length} 个回合</h2>
@@ -121,7 +119,7 @@ export function AiRequestsPage() {
                 <button type="button" onClick={() => setOpenTurn(open ? '' : turn.id)} aria-expanded={open} className="w-full px-4 py-3 text-left">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-[var(--ui-text)]">{label}{proactive ? ' · 主动私聊' : ''}</p>
+                      <p className="truncate text-sm font-medium text-[var(--ui-text)]">{label} · {proactive ? '主动私聊' : '对话回复'}</p>
                       <div className="mt-1.5 flex flex-wrap gap-1">
                         {ordered.map((trace) => (
                           <span key={trace.id} className="rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-1.5 py-0.5 text-[10px] text-[var(--ui-text-2)]">
@@ -138,11 +136,6 @@ export function AiRequestsPage() {
                 </button>
                 {open && (
                   <div className="border-t border-[var(--ui-border-soft)] bg-[var(--ui-surface-2)] p-3">
-                    {turn.conversationId && (
-                      <div className="mb-2 flex justify-end">
-                        <button type="button" onClick={() => void navigate(`/chat/${turn.conversationId}/ai-trace`)} className="text-[11px] text-[var(--ui-special-ink)]">在会话中查看 ›</button>
-                      </div>
-                    )}
                     <div className="space-y-3">
                       {ordered.map((trace, traceIndex) => <AiTraceStep key={trace.id} trace={trace} index={traceIndex} />)}
                     </div>

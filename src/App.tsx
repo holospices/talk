@@ -42,7 +42,6 @@ const ChatPage = lazy(() => loadChatPage().then((m) => ({ default: m.ChatPage })
 const ContactCardPage = lazy(() => loadContactCardPage().then((m) => ({ default: m.ContactCardPage })))
 const ContactGroupsPage = lazy(() => import('./pages/ContactGroupsPage').then((m) => ({ default: m.ContactGroupsPage })))
 const ContactPrivatePromptPage = lazy(() => import('./pages/ContactPrivatePromptPage').then((m) => ({ default: m.ContactPrivatePromptPage })))
-const ConversationAiTracePage = lazy(() => import('./pages/ConversationAiTracePage').then((m) => ({ default: m.ConversationAiTracePage })))
 const AiRequestsPage = lazy(() => import('./pages/AiRequestsPage').then((m) => ({ default: m.AiRequestsPage })))
 const ContactAdminPage = lazy(() => import('./pages/ContactAdminPage').then((m) => ({ default: m.ContactAdminPage })))
 const ContactAddPage = lazy(() => loadContactAddPage().then((m) => ({ default: m.ContactAddPage })))
@@ -301,7 +300,6 @@ function App() {
           <Route path="/me" element={<MePage />} />
         </Route>
         <Route path="/chat/:conversationId" element={<ChatPage />} />
-        <Route path="/chat/:conversationId/ai-trace" element={<ConversationAiTracePage />} />
         <Route path="/ai-requests" element={<AiRequestsPage />} />
         <Route path="/contact/new" element={<ContactAddPage />} />
         <Route path="/contact-groups" element={<ContactGroupsPage />} />
