@@ -1,6 +1,5 @@
 import { useNavigate } from 'react-router-dom'
 import { TopBar } from '../components/TopBar'
-import { ProactivePromptEditor } from '../components/ProactivePromptEditor'
 import { useSettingsStore } from '../store/useSettingsStore'
 
 const DAILY_CAP_MAX = 16 // slider position: 1-15 = real, 16 = ∞
@@ -169,8 +168,6 @@ export function ProactiveSettingsPage() {
             onChange={(v) => setSettings({ proactiveTickIntervalMs: v * 60 * 1000 })}
           />
         </div>
-
-        <ProactivePromptEditor />
 
         <div className="mx-4 mt-3">
           <button type="button" onClick={() => navigate('/ai-requests')} className="ui-secondary-action">查看 AI 请求记录›</button>

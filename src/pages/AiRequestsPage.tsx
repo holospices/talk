@@ -13,18 +13,21 @@ const EMPTY_TRACES: AdminAiTrace[] = []
 const EMPTY_CONVERSATIONS: Conversation[] = []
 const EMPTY_CONTACTS: Contact[] = []
 const EMPTY_GROUPS: Group[] = []
-type PurposeFilter = 'proactive' | 'chat' | 'all'
+type PurposeFilter = 'proactive' | 'chat' | 'memory' | 'all'
 
 export function AiRequestsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
-  const [filter, setFilter] = useState<PurposeFilter>(() => searchParams.get('purpose') === 'proactive' ? 'proactive' : searchParams.get('purpose') === 'chat' ? 'chat' : 'all')
+  const [filter, setFilter] = useState<PurposeFilter>(() => {
+    const purpose = searchParams.get('purpose')
+    return purpose === 'proactive' || purpose === 'chat' || purpose === 'memory' ? purpose : 'all'
+  })
   const [query, setQuery] = useState('')
   const [openTurn, setOpenTurn] = useState<string>('latest')
 
   const traces = useLiveQuery(async () => {
     const rows = await db.adminAiTraces.toArray()
     return rows
-      .filter((trace) => !!trace.conversationId && !isAiTestId(trace.conversationId) && (trace.purpose === 'chat' || trace.purpose === 'proactive'))
+      .filter((trace) => !!trace.conversationId && !isAiTestId(trace.conversationId) && (trace.purpose === 'chat' || trace.purpose === 'proactive' || trace.purpose === 'memory'))
       .sort((a, b) => b.createdAt - a.createdAt)
   }, []) ?? EMPTY_TRACES
   const conversations = useLiveQuery(() => db.conversations.toArray(), []) ?? EMPTY_CONVERSATIONS
@@ -51,8 +54,10 @@ export function AiRequestsPage() {
     return grouped.filter((turn) => {
       const proactive = turn.traces.some((trace) => trace.purpose === 'proactive')
       const chat = turn.traces.some((trace) => trace.purpose === 'chat')
+      const memory = turn.traces.some((trace) => trace.purpose === 'memory')
       if (filter === 'proactive' && !proactive) return false
       if (filter === 'chat' && !chat) return false
+      if (filter === 'memory' && !memory) return false
       if (!query.trim()) return true
       const label = turn.conversationId ? conversationLabel.get(turn.conversationId) ?? '' : ''
       return label.toLowerCase().includes(query.trim().toLowerCase())
@@ -80,10 +85,10 @@ export function AiRequestsPage() {
           <p className="ui-page-kicker">全部会话 · 最近 {traces.length} 条调用</p>
           <h1 className="ui-page-title">AI 到底收到了什么</h1>
           <p className="ui-page-summary">
-            不经过功能管理或天眼，直接看每一次请求的完整 system/user 消息与模型返回。主动私聊的单轮请求也会带「主动私聊」标记。记录只保留最近 500 条调用。
+            不经过功能管理或天眼，直接看每一次请求的完整 system/user 消息与模型返回。每条记录按「联系人 · 类型」命名，类型包括主动私聊、对话回复和记忆更新。记录只保留最近 500 条调用。
           </p>
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
-            {([['proactive', '主动私聊'], ['chat', '对话回复'], ['all', '全部']] as Array<[PurposeFilter, string]>).map(([value, label]) => (
+            {([['proactive', '主动私聊'], ['chat', '对话回复'], ['memory', '记忆更新'], ['all', '全部']] as Array<[PurposeFilter, string]>).map(([value, label]) => (
               <button
                 key={value}
                 type="button"
@@ -104,7 +109,7 @@ export function AiRequestsPage() {
         <div className="mx-4 space-y-2 pb-6">
           {turns.length === 0 && (
             <div className="ui-empty-state">
-              <p>{filter === 'proactive' ? '还没有主动私聊的记录。' : '还没有可显示的请求记录。'}</p>
+              <p>{filter === 'proactive' ? '还没有主动私聊的记录。' : filter === 'memory' ? '还没有记忆更新的记录。' : '还没有可显示的请求记录。'}</p>
               <p className="mt-1 text-xs text-[var(--ui-text-3)]">让联系人主动发一条消息，或打开任意聊天发一条消息后再回来。</p>
             </div>
           )}
@@ -112,6 +117,8 @@ export function AiRequestsPage() {
             const open = openTurn === turn.id || (openTurn === 'latest' && index === 0)
             const ordered = orderedTraceSteps(turn.traces)
             const proactive = ordered.some((trace) => trace.purpose === 'proactive')
+            const memory = ordered.some((trace) => trace.purpose === 'memory')
+            const typeLabel = proactive ? '主动私聊' : memory ? '记忆更新' : '对话回复'
             const failed = ordered.find((trace) => trace.error)
             const label = turn.conversationId ? conversationLabel.get(turn.conversationId) ?? '未知会话' : '未知会话'
             return (
@@ -119,7 +126,7 @@ export function AiRequestsPage() {
                 <button type="button" onClick={() => setOpenTurn(open ? '' : turn.id)} aria-expanded={open} className="w-full px-4 py-3 text-left">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-[var(--ui-text)]">{label} · {proactive ? '主动私聊' : '对话回复'}</p>
+                      <p className="truncate text-sm font-medium text-[var(--ui-text)]">{label} · {typeLabel}</p>
                       <div className="mt-1.5 flex flex-wrap gap-1">
                         {ordered.map((trace) => (
                           <span key={trace.id} className="rounded-full border border-[var(--ui-border)] bg-[var(--ui-surface-2)] px-1.5 py-0.5 text-[10px] text-[var(--ui-text-2)]">

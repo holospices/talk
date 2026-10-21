@@ -61,7 +61,15 @@ export function formatTraceDuration(durationMs?: number): string {
 }
 
 export function traceStageLabel(trace: AdminAiTrace): string {
+  if (trace.purpose === 'memory') return '记忆整理'
   return trace.stage ? AI_TRACE_STAGE_LABEL[trace.stage] : trace.purpose
+}
+
+function tracePurposeLabel(trace: AdminAiTrace): string {
+  if (trace.purpose === 'proactive') return '主动私聊'
+  if (trace.purpose === 'chat') return '对话回复'
+  if (trace.purpose === 'memory') return '记忆更新'
+  return trace.purpose
 }
 
 /** One expandable request/response step, shared by Sky Eye, conversation and global trace pages. */
@@ -70,7 +78,7 @@ export function AiTraceStep({ trace, index }: { trace: AdminAiTrace; index: numb
     <div className="rounded-[var(--ui-radius-control)] bg-[var(--ui-surface)] p-3">
       <div className="flex items-start justify-between gap-2">
         <p className="text-xs font-medium text-[var(--ui-text)]">{index + 1}. {traceStageLabel(trace)} <span className="font-normal text-[var(--ui-text-3)]">· {trace.model}</span></p>
-        <span className={`shrink-0 text-[10px] ${trace.purpose === 'proactive' ? 'text-[var(--ui-warning-ink)]' : 'text-[var(--ui-text-3)]'}`}>{trace.purpose === 'proactive' ? '主动私聊' : trace.purpose}</span>
+        <span className={`shrink-0 text-[10px] ${trace.purpose === 'proactive' ? 'text-[var(--ui-warning-ink)]' : 'text-[var(--ui-text-3)]'}`}>{tracePurposeLabel(trace)}</span>
       </div>
       <div className="mt-2 space-y-1.5">
         {trace.messages.map((message, messageIndex) => (

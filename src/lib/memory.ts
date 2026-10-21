@@ -468,6 +468,7 @@ export async function maybeUpdateMemory(
       jsonMode: true,
       purpose: 'memory',
       automatic: true,
+      trace: { turnId: `memory-${uuid()}`, stage: 'other', conversationId },
     })
     const updated = parseMemoryResponse(raw)
     if (!updated) return null
@@ -952,6 +953,7 @@ export async function maybeUpdateGroupMemory(
       jsonMode: true,
       purpose: 'memory',
       automatic: true,
+      trace: { turnId: `group-memory-${uuid()}`, stage: 'other', conversationId },
     })
 
     const updates = parseGroupMemoryResponse(raw, targets.length)
