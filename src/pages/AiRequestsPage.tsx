@@ -15,7 +15,7 @@ const EMPTY_CONTACTS: Contact[] = []
 const EMPTY_GROUPS: Group[] = []
 
 type CategoryKey = 'privateChat' | 'memory' | 'diary' | 'reminder' | 'moments' | 'persona' | 'worldbook' | 'offlineState' | 'quality' | 'other'
-type FilterKey = 'all' | CategoryKey
+type FilterKey = 'all' | 'chat' | 'memory' | 'generation' | 'system'
 
 const CATEGORY_LABELS: Record<CategoryKey, string> = {
   privateChat: '私聊',
@@ -30,7 +30,21 @@ const CATEGORY_LABELS: Record<CategoryKey, string> = {
   other: '其他',
 }
 
-const FILTERS: CategoryKey[] = ['privateChat', 'memory', 'diary', 'reminder', 'moments', 'persona', 'worldbook', 'offlineState', 'quality', 'other']
+const FILTER_LABELS: Record<Exclude<FilterKey, 'all'>, string> = {
+  chat: '私聊',
+  memory: '记忆',
+  generation: '生成',
+  system: '系统',
+}
+
+const FILTERS: Array<Exclude<FilterKey, 'all'>> = ['chat', 'memory', 'generation', 'system']
+
+function filterGroupForCategory(category: CategoryKey): Exclude<FilterKey, 'all'> {
+  if (category === 'privateChat') return 'chat'
+  if (category === 'memory') return 'memory'
+  if (category === 'diary' || category === 'reminder' || category === 'moments' || category === 'persona') return 'generation'
+  return 'system'
+}
 
 function categoryForTrace(trace: AdminAiTrace): CategoryKey {
   if (trace.label === '日记生成') return 'diary'
@@ -43,15 +57,15 @@ function categoryForTurn(traces: AdminAiTrace[]): CategoryKey {
   return traces.map(categoryForTrace)[0] ?? 'other'
 }
 
-function isCategoryKey(value: string | null): value is CategoryKey {
-  return !!value && value in CATEGORY_LABELS
+function isFilterKey(value: string | null): value is FilterKey {
+  return value === 'all' || value === 'chat' || value === 'memory' || value === 'generation' || value === 'system'
 }
 
 export function AiRequestsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [filter, setFilter] = useState<FilterKey>(() => {
     const purpose = searchParams.get('purpose')
-    return isCategoryKey(purpose) ? purpose : 'all'
+    return isFilterKey(purpose) ? purpose : 'all'
   })
   const [query, setQuery] = useState('')
   const [openTurn, setOpenTurn] = useState<string>('latest')
@@ -85,7 +99,7 @@ export function AiRequestsPage() {
     const grouped = groupAiTraces(traces)
     return grouped.filter((turn) => {
       const category = categoryForTurn(turn.traces)
-      if (filter !== 'all' && category !== filter) return false
+      if (filter !== 'all' && filterGroupForCategory(category) !== filter) return false
       if (!query.trim()) return true
       const label = turn.conversationId ? conversationLabel.get(turn.conversationId) ?? '' : ''
       const searchable = `${label} ${CATEGORY_LABELS[category]} ${turn.traces.map((trace) => trace.label ?? '').join(' ')}`
@@ -114,7 +128,7 @@ export function AiRequestsPage() {
           <p className="ui-page-kicker">全部模型调用 · 最近 {traces.length} 条</p>
           <h1 className="ui-page-title">AI 到底收到了什么</h1>
           <p className="ui-page-summary">
-            所有模型请求都在这里：私聊（含对话回复和主动私聊）、记忆更新、日记、提醒、朋友圈、人物生成等。每条按「联系人/系统 · 类型」命名，展开可看完整 system/user 消息与返回。本地执行事件不计入；记录保留最近 500 条调用。
+            所有模型请求都在这里，筛选只保留五类：全部、私聊（含对话回复和主动私聊）、记忆、生成（日记/提醒/朋友圈/人物生成）、系统（世界书/离线经历/质量检查等）。每条仍按具体类型命名；展开可看完整 system/user 消息与返回。本地执行事件不计入；记录保留最近 500 条调用。
           </p>
           <div className="mt-3 flex gap-1.5 overflow-x-auto pb-1">
             <button
@@ -131,7 +145,7 @@ export function AiRequestsPage() {
                 onClick={() => changeFilter(key)}
                 className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-xs ${filter === key ? 'bg-[var(--ui-action)] text-[var(--ui-on-action)]' : 'bg-[var(--ui-surface-2)] text-[var(--ui-text-2)]'}`}
               >
-                {CATEGORY_LABELS[key]}
+                {FILTER_LABELS[key]}
               </button>
             ))}
           </div>
@@ -145,7 +159,7 @@ export function AiRequestsPage() {
         <div className="mx-4 space-y-2 pb-6">
           {turns.length === 0 && (
             <div className="ui-empty-state">
-              <p>{filter === 'all' ? '还没有可显示的请求记录。' : `还没有「${CATEGORY_LABELS[filter]}」的记录。`}</p>
+              <p>{filter === 'all' ? '还没有可显示的请求记录。' : `还没有「${FILTER_LABELS[filter]}」的记录。`}</p>
               <p className="mt-1 text-xs text-[var(--ui-text-3)]">聊天、主动私聊、记忆整理或日记生成后，再回来看看。</p>
             </div>
           )}
